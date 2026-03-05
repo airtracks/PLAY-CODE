@@ -9,6 +9,9 @@
 </head>
 <body>
   <div id="app">
+    <!-- Toast container -->
+    <div id="toastContainer" class="toast-container"></div>
+
     <!-- Header -->
     <header class="header">
       <div class="header-left">
@@ -26,7 +29,24 @@
           <p class="subtitle">DumaOS — Netgear Nighthawk</p>
         </div>
       </div>
+
+      <!-- Game selector -->
+      <div class="game-selector-wrap">
+        <label class="game-selector-label">게임 프로파일</label>
+        <select id="gameSelect" class="game-select">
+          <option value="all">🌐 전체 (기본)</option>
+          <option value="cod">🔫 Call of Duty</option>
+          <option value="fortnite">🏗 Fortnite</option>
+          <option value="apex">🎯 Apex Legends</option>
+          <option value="fifa">⚽ EA FC (FIFA)</option>
+          <option value="valorant">🌸 Valorant</option>
+        </select>
+      </div>
+
       <div class="header-right">
+        <div class="quality-badge" id="qualityBadge">
+          <span class="quality-label" id="qualityLabel">—</span>
+        </div>
         <div class="status-badge" id="filterStatusBadge">
           <span class="status-dot" id="statusDot"></span>
           <span id="statusText">활성화</span>
@@ -73,6 +93,13 @@
             <span>2500km</span>
             <span>5000km</span>
           </div>
+          <!-- Quick presets -->
+          <div class="preset-btns">
+            <button class="preset-btn" data-km="500">500</button>
+            <button class="preset-btn" data-km="1000">1000</button>
+            <button class="preset-btn" data-km="2000">2000</button>
+            <button class="preset-btn" data-km="5000">무제한</button>
+          </div>
         </section>
 
         <!-- Ping Assist -->
@@ -94,6 +121,11 @@
               <input type="checkbox" id="strictMode" />
               <span class="slider"></span>
             </label>
+          </div>
+          <!-- Ping graph -->
+          <div class="ping-graph-wrap">
+            <div class="ping-graph-label">실시간 평균 핑</div>
+            <canvas id="pingGraph" width="192" height="44"></canvas>
           </div>
         </section>
 
@@ -131,6 +163,9 @@
           <button class="map-btn" id="btnAddServer" title="테스트 서버 추가">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
+          <button class="map-btn" id="btnLoadAll" title="모든 서버 로드">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4v4l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          </button>
           <button class="map-btn" id="btnClearAll" title="모두 지우기">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
@@ -142,6 +177,11 @@
 
       <!-- Right Panel -->
       <aside class="right-panel">
+        <!-- Search -->
+        <div class="server-search-wrap">
+          <input type="text" id="serverSearch" class="server-search" placeholder="서버 검색..." />
+        </div>
+
         <!-- Server list tabs -->
         <div class="tabs">
           <button class="tab active" data-tab="all">전체</button>

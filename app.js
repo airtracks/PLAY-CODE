@@ -15,6 +15,48 @@ const state = {
   servers: [],
   activeTab: 'all',
   nextId: 1,
+  currentGame: 'all',
+  searchQuery: '',
+  pingHistory: [],          // rolling avg ping history for graph
+};
+
+/* ─── Game Profiles ──────────────────────────────────────────────────── */
+const GAME_PROFILES = {
+  all: {
+    label: '전체',
+    recommended: { radius: 1000, maxPing: 80 },
+    serverRegions: null,   // use all
+  },
+  cod: {
+    label: 'Call of Duty',
+    recommended: { radius: 800, maxPing: 60 },
+    serverRegions: ['Seoul KR-1', 'Seoul KR-2', 'Tokyo JP-1', 'Tokyo JP-2',
+                    'Singapore SG-1', 'Frankfurt EU-1', 'N.Virginia US-1', 'Oregon US-2'],
+  },
+  fortnite: {
+    label: 'Fortnite',
+    recommended: { radius: 1500, maxPing: 80 },
+    serverRegions: ['Seoul KR-1', 'Tokyo JP-1', 'Singapore SG-1', 'Hong Kong HK-1',
+                    'Sydney AU-1', 'Frankfurt EU-1', 'N.Virginia US-1'],
+  },
+  apex: {
+    label: 'Apex Legends',
+    recommended: { radius: 1200, maxPing: 70 },
+    serverRegions: ['Seoul KR-1', 'Seoul KR-2', 'Tokyo JP-1', 'Singapore SG-1',
+                    'Frankfurt EU-1', 'Amsterdam EU-2', 'N.Virginia US-1', 'Oregon US-2'],
+  },
+  fifa: {
+    label: 'EA FC',
+    recommended: { radius: 1000, maxPing: 60 },
+    serverRegions: ['Seoul KR-1', 'Tokyo JP-1', 'Singapore SG-1', 'Frankfurt EU-1',
+                    'Amsterdam EU-2', 'London EU-3', 'N.Virginia US-1'],
+  },
+  valorant: {
+    label: 'Valorant',
+    recommended: { radius: 700, maxPing: 50 },
+    serverRegions: ['Seoul KR-1', 'Seoul KR-2', 'Tokyo JP-1', 'Tokyo JP-2',
+                    'Singapore SG-1', 'Singapore SG-2', 'Hong Kong HK-1'],
+  },
 };
 
 /* ─── Map init ───────────────────────────────────────────────────────── */
@@ -163,15 +205,11 @@ const SERVER_POOL = [
 let poolIndex = 0;
 
 function addServerFromPool() {
-  if (poolIndex >= SERVER_POOL.length) return;
+  if (poolIndex >= SERVER_POOL.length) return false;
   const template = SERVER_POOL[poolIndex++];
   const ping = estimatePing(template.lat, template.lng);
-  addServer({
-    name: template.name,
-    lat: template.lat,
-    lng: template.lng,
-    ping,
-  });
+  addServer({ name: template.name, lat: template.lat, lng: template.lng, ping });
+  return true;
 }
 
 /* ─── Add / remove servers ───────────────────────────────────────────── */
@@ -211,7 +249,7 @@ function buildPopupHtml(server, status) {
       <div style="font-weight:700;font-size:13px;margin-bottom:6px;">${server.name}</div>
       <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:4px;">
         <span>핑</span>
-        <span class="ping-value ping-${pingClass}" style="color:${
+        <span style="color:${
           pingClass === 'good' ? '#22c55e' : pingClass === 'ok' ? '#f97316' : '#ef4444'
         };font-weight:600;">${server.ping}ms</span>
       </div>
@@ -260,6 +298,10 @@ window.toggleWhitelist = function (id) {
   renderServerList();
   updateStats();
   map.closePopup();
+  showToast(
+    server.whitelisted ? `✅ ${server.name} 화이트리스트 추가됨` : `❌ ${server.name} 화이트리스트 해제됨`,
+    server.whitelisted ? 'success' : 'info'
+  );
 };
 
 window.removeServer = function (id) {
@@ -271,18 +313,126 @@ window.removeServer = function (id) {
   renderServerList();
   updateStats();
   map.closePopup();
+  showToast(`🗑 ${server.name} 삭제됨`, 'info');
 };
+
+/* ─── Toast notifications ────────────────────────────────────────────── */
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toastContainer');
+  const toast = document.createElement('div');
+  toast.className = `toast toast-${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+
+  requestAnimationFrame(() => toast.classList.add('toast-visible'));
+
+  setTimeout(() => {
+    toast.classList.remove('toast-visible');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
+
+/* ─── Connection quality ─────────────────────────────────────────────── */
+function getConnectionQuality(avgPing) {
+  if (avgPing === null) return { label: '—', cls: '' };
+  if (avgPing < 40)  return { label: '최상', cls: 'quality-excellent' };
+  if (avgPing < 70)  return { label: '좋음', cls: 'quality-good' };
+  if (avgPing < 120) return { label: '보통', cls: 'quality-ok' };
+  return { label: '불량', cls: 'quality-bad' };
+}
+
+function updateQualityBadge(avgPing) {
+  const badge = document.getElementById('qualityBadge');
+  const label = document.getElementById('qualityLabel');
+  const { label: text, cls } = getConnectionQuality(avgPing);
+  label.textContent = text;
+  badge.className = `quality-badge ${cls}`;
+}
+
+/* ─── Ping graph (canvas) ────────────────────────────────────────────── */
+const GRAPH_MAX_POINTS = 30;
+
+function recordPingHistory(avg) {
+  if (avg === null) return;
+  state.pingHistory.push(avg);
+  if (state.pingHistory.length > GRAPH_MAX_POINTS) state.pingHistory.shift();
+  drawPingGraph();
+}
+
+function drawPingGraph() {
+  const canvas = document.getElementById('pingGraph');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width;
+  const H = canvas.height;
+
+  ctx.clearRect(0, 0, W, H);
+
+  if (state.pingHistory.length < 2) return;
+
+  const maxVal = Math.max(...state.pingHistory, 20);
+  const minVal = 0;
+  const range = maxVal - minVal || 1;
+
+  // Grid lines
+  ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+  ctx.lineWidth = 1;
+  [0.25, 0.5, 0.75].forEach(frac => {
+    const y = H - frac * H;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(W, y);
+    ctx.stroke();
+  });
+
+  // Gradient fill
+  const grad = ctx.createLinearGradient(0, 0, 0, H);
+  grad.addColorStop(0, 'rgba(0,212,255,0.35)');
+  grad.addColorStop(1, 'rgba(0,212,255,0)');
+
+  const points = state.pingHistory.map((v, i) => ({
+    x: (i / (GRAPH_MAX_POINTS - 1)) * W,
+    y: H - ((v - minVal) / range) * (H - 4) - 2,
+  }));
+
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, H);
+  points.forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.lineTo(points[points.length - 1].x, H);
+  ctx.closePath();
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Line
+  ctx.beginPath();
+  ctx.moveTo(points[0].x, points[0].y);
+  points.slice(1).forEach(p => ctx.lineTo(p.x, p.y));
+  ctx.strokeStyle = '#00d4ff';
+  ctx.lineWidth = 1.5;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+
+  // Last point dot
+  const last = points[points.length - 1];
+  ctx.beginPath();
+  ctx.arc(last.x, last.y, 3, 0, Math.PI * 2);
+  ctx.fillStyle = '#00d4ff';
+  ctx.fill();
+}
 
 /* ─── Server list render ─────────────────────────────────────────────── */
 function renderServerList() {
   const list = document.getElementById('serverList');
   const tab = state.activeTab;
+  const query = state.searchQuery.toLowerCase();
 
   let servers = state.servers.map(s => ({ ...s, status: getServerStatus(s) }));
 
   if (tab === 'allowed') servers = servers.filter(s => s.status === 'allowed');
   else if (tab === 'blocked') servers = servers.filter(s => s.status === 'blocked');
   else if (tab === 'whitelist') servers = servers.filter(s => s.whitelisted);
+
+  if (query) servers = servers.filter(s => s.name.toLowerCase().includes(query));
 
   if (servers.length === 0) {
     list.innerHTML = `
@@ -291,7 +441,7 @@ function renderServerList() {
           <circle cx="20" cy="20" r="18" stroke="#444" stroke-width="2"/>
           <path d="M13 20h14M20 13v14" stroke="#444" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        <p>${tab === 'all' ? '서버를 추가하려면<br/>+ 버튼을 클릭하세요' : '해당하는 서버가 없습니다'}</p>
+        <p>${query ? '검색 결과가 없습니다' : tab === 'all' ? '서버를 추가하려면<br/>+ 버튼을 클릭하세요' : '해당하는 서버가 없습니다'}</p>
       </div>`;
     return;
   }
@@ -347,6 +497,8 @@ function updateStats() {
   document.getElementById('allowedServers').textContent = allowed;
   document.getElementById('blockedServers').textContent = blocked;
   document.getElementById('avgPing').textContent = avg !== null ? `${avg}ms` : '—';
+
+  updateQualityBadge(avg);
 }
 
 /* ─── Location display ───────────────────────────────────────────────── */
@@ -361,6 +513,7 @@ function geolocate() {
     updateLocationText();
     return;
   }
+  showToast('📍 위치를 감지하는 중...', 'info');
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       state.homeLatLng = [pos.coords.latitude, pos.coords.longitude];
@@ -371,8 +524,12 @@ function geolocate() {
       updateAllServerMarkers();
       renderServerList();
       updateStats();
+      showToast('✅ 위치가 업데이트되었습니다', 'success');
     },
-    () => updateLocationText()
+    () => {
+      updateLocationText();
+      showToast('⚠️ 위치를 감지할 수 없습니다', 'warning');
+    }
   );
 }
 
@@ -381,9 +538,59 @@ function updateRadius(km) {
   state.radiusKm = km;
   radiusCircle.setRadius(km * 1000);
   document.getElementById('radiusValue').textContent = km.toLocaleString();
+  document.getElementById('radiusSlider').value = km;
+
+  // Highlight active preset
+  document.querySelectorAll('.preset-btn').forEach(btn => {
+    btn.classList.toggle('active', Number(btn.dataset.km) === km);
+  });
+
   updateAllServerMarkers();
   renderServerList();
   updateStats();
+}
+
+/* ─── Game profile switch ────────────────────────────────────────────── */
+function applyGameProfile(gameKey) {
+  state.currentGame = gameKey;
+  const profile = GAME_PROFILES[gameKey];
+  if (!profile) return;
+
+  // Apply recommended settings
+  document.getElementById('maxPing').value = profile.recommended.maxPing;
+  state.maxPing = profile.recommended.maxPing;
+  updateRadius(profile.recommended.radius);
+
+  // Clear existing servers
+  state.servers.forEach(s => { if (s.marker) map.removeLayer(s.marker); });
+  state.servers = [];
+  poolIndex = 0;
+  state.nextId = 1;
+
+  // Load relevant servers
+  const regionsToLoad = profile.serverRegions || SERVER_POOL.map(s => s.name);
+  SERVER_POOL.forEach((template, idx) => {
+    if (regionsToLoad.includes(template.name)) {
+      const ping = estimatePing(template.lat, template.lng);
+      addServer({ name: template.name, lat: template.lat, lng: template.lng, ping });
+    }
+  });
+  // sync poolIndex
+  poolIndex = SERVER_POOL.length;
+
+  renderServerList();
+  updateStats();
+
+  const countAdded = state.servers.length;
+  showToast(`🎮 ${profile.label} 프로파일 적용 — 서버 ${countAdded}개 로드됨`, 'success');
+
+  setTimeout(() => {
+    if (state.servers.length > 0) {
+      const bounds = L.latLngBounds([state.homeLatLng]);
+      state.servers.forEach(s => bounds.extend([s.lat, s.lng]));
+      map.flyToBounds(bounds, { padding: [40, 40] });
+    }
+  }, 300);
 }
 
 /* ─── Ping simulation refresh ────────────────────────────────────────── */
@@ -395,6 +602,11 @@ function simulatePingUpdate() {
   });
   renderServerList();
   updateStats();
+
+  // Record avg ping for graph
+  const pings = state.servers.map(s => s.ping);
+  const avg = pings.length ? Math.round(pings.reduce((a, b) => a + b, 0) / pings.length) : null;
+  recordPingHistory(avg);
 }
 
 /* ─── Event wiring ───────────────────────────────────────────────────── */
@@ -405,9 +617,11 @@ document.getElementById('filterToggle').addEventListener('change', (e) => {
   if (state.filterEnabled) {
     dot.classList.remove('inactive');
     text.textContent = '활성화';
+    showToast('🛡 지오필터 활성화됨', 'success');
   } else {
     dot.classList.add('inactive');
     text.textContent = '비활성화';
+    showToast('⛔ 지오필터 비활성화됨', 'warning');
   }
   updateAllServerMarkers();
   renderServerList();
@@ -432,25 +646,45 @@ document.getElementById('strictMode').addEventListener('change', (e) => {
   updateAllServerMarkers();
   renderServerList();
   updateStats();
+  showToast(state.strictMode ? '🔒 엄격 모드 활성화됨' : '🔓 엄격 모드 해제됨', 'info');
 });
 
 document.getElementById('refreshLocation').addEventListener('click', geolocate);
 
 document.getElementById('btnAddServer').addEventListener('click', () => {
-  if (poolIndex >= SERVER_POOL.length) {
-    alert('더 추가할 수 있는 샘플 서버가 없습니다.');
-    return;
+  const added = addServerFromPool();
+  if (!added) {
+    showToast('더 추가할 수 있는 샘플 서버가 없습니다.', 'warning');
   }
-  addServerFromPool();
+});
+
+document.getElementById('btnLoadAll').addEventListener('click', () => {
+  let count = 0;
+  while (poolIndex < SERVER_POOL.length) {
+    addServerFromPool();
+    count++;
+  }
+  if (count > 0) {
+    showToast(`📡 서버 ${count}개 추가 로드됨`, 'success');
+    setTimeout(() => {
+      const bounds = L.latLngBounds([state.homeLatLng]);
+      state.servers.forEach(s => bounds.extend([s.lat, s.lng]));
+      map.flyToBounds(bounds, { padding: [40, 40] });
+    }, 200);
+  } else {
+    showToast('이미 모든 서버가 로드되었습니다.', 'info');
+  }
 });
 
 document.getElementById('btnClearAll').addEventListener('click', () => {
+  const count = state.servers.length;
   state.servers.forEach(s => { if (s.marker) map.removeLayer(s.marker); });
   state.servers = [];
   poolIndex = 0;
   state.nextId = 1;
   renderServerList();
   updateStats();
+  if (count > 0) showToast(`🗑 서버 ${count}개 모두 삭제됨`, 'info');
 });
 
 document.getElementById('btnFitBounds').addEventListener('click', () => {
@@ -473,12 +707,31 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 
+/* Quick radius preset buttons */
+document.querySelectorAll('.preset-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    updateRadius(Number(btn.dataset.km));
+  });
+});
+
+/* Game selector */
+document.getElementById('gameSelect').addEventListener('change', (e) => {
+  applyGameProfile(e.target.value);
+});
+
+/* Server search */
+document.getElementById('serverSearch').addEventListener('input', (e) => {
+  state.searchQuery = e.target.value;
+  renderServerList();
+});
+
 /* ─── Double-click on map to add custom server ───────────────────────── */
 map.on('dblclick', (e) => {
   const { lat, lng } = e.latlng;
   const ping = estimatePing(lat, lng);
   const name = `Custom ${lat.toFixed(2)}, ${lng.toFixed(2)}`;
   addServer({ name, lat, lng, ping });
+  showToast(`📍 커스텀 서버 추가됨 (${ping}ms)`, 'info');
 });
 
 /* ─── Init ───────────────────────────────────────────────────────────── */
