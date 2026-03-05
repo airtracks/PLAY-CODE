@@ -12,11 +12,11 @@
     <!-- Toast container -->
     <div id="toastContainer" class="toast-container"></div>
 
-    <!-- Header -->
-    <header class="header">
+    <!-- ── Header (드래그 가능 타이틀바) ─────────────────────────────── -->
+    <header class="header" id="appHeader">
       <div class="header-left">
         <div class="logo">
-          <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+          <svg width="26" height="26" viewBox="0 0 28 28" fill="none">
             <circle cx="14" cy="14" r="13" stroke="#00d4ff" stroke-width="2"/>
             <circle cx="14" cy="14" r="6" fill="#00d4ff" opacity="0.3"/>
             <line x1="14" y1="1" x2="14" y2="27" stroke="#00d4ff" stroke-width="1" opacity="0.5"/>
@@ -31,7 +31,7 @@
       </div>
 
       <!-- Game selector -->
-      <div class="game-selector-wrap">
+      <div class="game-selector-wrap no-drag">
         <label class="game-selector-label">게임 프로파일</label>
         <select id="gameSelect" class="game-select">
           <option value="all">🌐 전체 (기본)</option>
@@ -43,11 +43,11 @@
         </select>
       </div>
 
-      <div class="header-right">
+      <div class="header-right no-drag">
         <div class="quality-badge" id="qualityBadge">
-          <span class="quality-label" id="qualityLabel">—</span>
+          <span id="qualityLabel">—</span>
         </div>
-        <div class="status-badge" id="filterStatusBadge">
+        <div class="status-badge">
           <span class="status-dot" id="statusDot"></span>
           <span id="statusText">활성화</span>
         </div>
@@ -55,31 +55,80 @@
           <input type="checkbox" id="filterToggle" checked />
           <span class="slider"></span>
         </label>
+
+        <!-- ── Window Controls (Electron only) ──────────────────────── -->
+        <div class="win-controls" id="winControls">
+          <button class="win-btn pin-btn" id="btnPin" title="항상 위에 표시">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+              <path d="M9 1.5L7 4 8.5 5.5 6 7.5 4.5 6l-3 3 1 1 2.5-2.5 1.5 1.5 2-2.5L8 8l1.5-2L7 4.5 8.5 3 9 1.5z"/>
+            </svg>
+          </button>
+          <button class="win-btn minimize-btn" id="btnMinimize" title="최소화">
+            <svg width="12" height="2" viewBox="0 0 12 2" fill="currentColor"><rect width="12" height="2" rx="1"/></svg>
+          </button>
+          <button class="win-btn close-btn" id="btnClose" title="닫기">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <path d="M1 1l8 8M9 1L1 9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+            </svg>
+          </button>
+        </div>
       </div>
     </header>
 
-    <!-- Main layout -->
+    <!-- ── Main layout ─────────────────────────────────────────────── -->
     <div class="main-layout">
-      <!-- Left Panel -->
+
+      <!-- ── Left Panel ──────────────────────────────────────────── -->
       <aside class="left-panel">
-        <!-- Location Setup -->
+
+        <!-- 내 위치 -->
         <section class="panel-section">
           <h2 class="section-title">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M7 0C4.24 0 2 2.24 2 5c0 3.75 5 9 5 9s5-5.25 5-9c0-2.76-2.24-5-5-5zm0 6.5C6.17 6.5 5.5 5.83 5.5 5S6.17 3.5 7 3.5 8.5 4.17 8.5 5 7.83 6.5 7 6.5z"/></svg>
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><path d="M7 0C4.24 0 2 2.24 2 5c0 3.75 5 9 5 9s5-5.25 5-9c0-2.76-2.24-5-5-5zm0 6.5C6.17 6.5 5.5 5.83 5.5 5S6.17 3.5 7 3.5 8.5 4.17 8.5 5 7.83 6.5 7 6.5z"/></svg>
             내 위치
           </h2>
-          <div class="location-display" id="locationDisplay">
+          <div class="location-display">
             <span id="locationText">위치 감지 중...</span>
             <button class="icon-btn" id="refreshLocation" title="위치 새로고침">
-              <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M11.49 3.17C10.43 2.1 8.99 1.43 7.39 1.43c-3.19 0-5.79 2.6-5.79 5.79s2.6 5.79 5.79 5.79c2.69 0 4.97-1.85 5.62-4.36h-1.51c-.59 1.77-2.25 3.07-4.11 3.07-2.47 0-4.5-2.03-4.5-4.5s2.03-4.5 4.5-4.5c1.24 0 2.35.52 3.16 1.34L8.14 5.64H12V1.78l-2.51 1.39z"/></svg>
+              <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><path d="M11.49 3.17C10.43 2.1 8.99 1.43 7.39 1.43c-3.19 0-5.79 2.6-5.79 5.79s2.6 5.79 5.79 5.79c2.69 0 4.97-1.85 5.62-4.36h-1.51c-.59 1.77-2.25 3.07-4.11 3.07-2.47 0-4.5-2.03-4.5-4.5s2.03-4.5 4.5-4.5c1.24 0 2.35.52 3.16 1.34L8.14 5.64H12V1.78l-2.51 1.39z"/></svg>
             </button>
           </div>
         </section>
 
-        <!-- Radius Control -->
+        <!-- ── IP 위치 추적 (핵심 기능) ─────────────────────────────── -->
+        <section class="panel-section ip-section">
+          <h2 class="section-title">
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor">
+              <circle cx="7" cy="7" r="6" fill="none" stroke="currentColor" stroke-width="1.4"/>
+              <circle cx="7" cy="7" r="1.5" fill="currentColor"/>
+              <line x1="7" y1="1" x2="7" y2="3.5" stroke="currentColor" stroke-width="1.4"/>
+              <line x1="7" y1="10.5" x2="7" y2="13" stroke="currentColor" stroke-width="1.4"/>
+              <line x1="1" y1="7" x2="3.5" y2="7" stroke="currentColor" stroke-width="1.4"/>
+              <line x1="10.5" y1="7" x2="13" y2="7" stroke="currentColor" stroke-width="1.4"/>
+            </svg>
+            IP 위치 추적
+          </h2>
+
+          <!-- IP 입력 -->
+          <div class="ip-row">
+            <input type="text" id="ipInput" class="ip-input"
+              placeholder="xxx.xxx.xxx.xxx" maxlength="45"
+              spellcheck="false" autocomplete="off" />
+            <button class="ip-lookup-btn" id="btnLookupIP">조회</button>
+          </div>
+          <button class="my-ip-btn" id="btnMyIP">📡 내 공인 IP 확인</button>
+
+          <!-- 조회 결과 -->
+          <div id="ipResult" class="ip-result hidden"></div>
+
+          <!-- 조회 히스토리 -->
+          <div id="ipHistory" class="ip-history"></div>
+        </section>
+
+        <!-- 필터 반경 -->
         <section class="panel-section">
           <h2 class="section-title">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="7" cy="7" r="1.5"/></svg>
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="7" cy="7" r="1.5"/></svg>
             필터 반경
           </h2>
           <div class="radius-display">
@@ -89,11 +138,8 @@
           <input type="range" id="radiusSlider" class="radius-slider"
             min="50" max="5000" value="1000" step="50" />
           <div class="radius-labels">
-            <span>50km</span>
-            <span>2500km</span>
-            <span>5000km</span>
+            <span>50km</span><span>2500km</span><span>5000km</span>
           </div>
-          <!-- Quick presets -->
           <div class="preset-btns">
             <button class="preset-btn" data-km="500">500</button>
             <button class="preset-btn" data-km="1000">1000</button>
@@ -102,10 +148,10 @@
           </div>
         </section>
 
-        <!-- Ping Assist -->
+        <!-- 핑 어시스트 -->
         <section class="panel-section">
           <h2 class="section-title">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M1 10h2V7H1v3zm3 2h2V5H4v7zm3-9v11h2V3H7zm3 4v7h2V7h-2z"/></svg>
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><path d="M1 10h2V7H1v3zm3 2h2V5H4v7zm3-9v11h2V3H7zm3 4v7h2V7h-2z"/></svg>
             핑 어시스트
           </h2>
           <div class="ping-assist-row">
@@ -122,17 +168,16 @@
               <span class="slider"></span>
             </label>
           </div>
-          <!-- Ping graph -->
           <div class="ping-graph-wrap">
             <div class="ping-graph-label">실시간 평균 핑</div>
-            <canvas id="pingGraph" width="192" height="44"></canvas>
+            <canvas id="pingGraph" height="44"></canvas>
           </div>
         </section>
 
-        <!-- Stats -->
+        <!-- 통계 -->
         <section class="panel-section">
           <h2 class="section-title">
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="12" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M4 9l2-3 2 2 2-4"/></svg>
+            <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="12" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M4 9l2-3 2 2 2-4"/></svg>
             통계
           </h2>
           <div class="stats-grid">
@@ -156,33 +201,31 @@
         </section>
       </aside>
 
-      <!-- Map -->
+      <!-- ── Map ─────────────────────────────────────────────────── -->
       <div class="map-container">
         <div id="map"></div>
         <div class="map-controls">
           <button class="map-btn" id="btnAddServer" title="테스트 서버 추가">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
           <button class="map-btn" id="btnLoadAll" title="모든 서버 로드">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4v4l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 4v4l3 2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
           </button>
           <button class="map-btn" id="btnClearAll" title="모두 지우기">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
           <button class="map-btn" id="btnFitBounds" title="맞춤 보기">
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="5" height="5" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="2" width="5" height="5" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="9" width="5" height="5" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="9" width="5" height="5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor"><rect x="2" y="2" width="5" height="5" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="2" width="5" height="5" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="2" y="9" width="5" height="5" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="9" y="9" width="5" height="5" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
           </button>
         </div>
       </div>
 
-      <!-- Right Panel -->
+      <!-- ── Right Panel ─────────────────────────────────────────── -->
       <aside class="right-panel">
-        <!-- Search -->
         <div class="server-search-wrap">
           <input type="text" id="serverSearch" class="server-search" placeholder="서버 검색..." />
         </div>
 
-        <!-- Server list tabs -->
         <div class="tabs">
           <button class="tab active" data-tab="all">전체</button>
           <button class="tab" data-tab="allowed">허용</button>
@@ -197,10 +240,12 @@
           </div>
         </div>
 
-        <!-- Legend -->
         <div class="legend">
           <div class="legend-item">
             <span class="legend-dot home"></span>내 위치
+          </div>
+          <div class="legend-item">
+            <span class="legend-dot ip-track"></span>IP 추적
           </div>
           <div class="legend-item">
             <span class="legend-dot allowed"></span>허용됨
