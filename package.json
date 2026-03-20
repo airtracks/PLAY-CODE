@@ -1,0 +1,44 @@
+{
+  "name": "geofilter-widget",
+  "version": "1.0.0",
+  "description": "DumaOS GeoFilter Widget — Netgear Nighthawk 연동 실행형 위젯",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build:linux": "electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "^29.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.dumaos.geofilter-widget",
+    "productName": "GeoFilter Widget",
+    "copyright": "DumaOS Style — Netgear Nighthawk",
+    "files": [
+      "*.html",
+      "*.js",
+      "*.css",
+      "!node_modules"
+    ],
+    "directories": {
+      "output": "dist"
+    },
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "mac": {
+      "target": [{ "target": "dmg", "arch": ["x64", "arm64"] }]
+    },
+    "linux": {
+      "target": [{ "target": "AppImage", "arch": ["x64"] }]
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "deleteAppDataOnUninstall": true
+    }
+  }
+}
