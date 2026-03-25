@@ -1,41 +1,31 @@
 /* ──────────────────────────────────────────────────────────────────────
    GeoFilter Widget — DumaOS Style
-   Netgear Nighthawk compatible GeoFilter standalone widget
    ────────────────────────────────────────────────────────────────────── */
-
 'use strict';
 
 /* ─── State ──────────────────────────────────────────────────────────── */
 const state = {
   filterEnabled: true,
-  strictMode: false,
-  homeLatLng: [37.5665, 126.9780],   // Default: Seoul, KR
-  radiusKm: 1000,
-  maxPing: 80,
-  servers: [],
-  activeTab: 'all',
-  nextId: 1,
+  strictMode:    false,
+  homeLatLng:    [37.5665, 126.9780],
+  radiusKm:      1000,
+  maxPing:       80,
+  servers:       [],
+  savedIPs:      [],       // { id, ip, name, lat, lng, country, city, ping, blocked, marker, line }
+  activeTab:     'all',
+  nextServerId:  1,
+  nextIpId:      1,
+  renameTarget:  null,     // 현재 이름 변경 중인 IP id
 };
 
-/* ─── Map init ───────────────────────────────────────────────────────── */
-const map = L.map('map', {
-  center: state.homeLatLng,
-  zoom: 4,
-  zoomControl: true,
-  attributionControl: true,
-});
+/* ─── Map ────────────────────────────────────────────────────────────── */
+const map = L.map('map', { center: state.homeLatLng, zoom: 4 });
 
-// CartoDB Dark Matter — 외부 API 키 불필요, 403 차단 없음
 const tileLayer = L.tileLayer(
   'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
-  {
-    attribution: '© CartoDB © OpenStreetMap contributors',
-    subdomains: 'abcd',
-    maxZoom: 19,
-  }
+  { attribution: '© CartoDB © OpenStreetMap', subdomains: 'abcd', maxZoom: 19 }
 ).addTo(map);
 
-// 타일 로드 실패 시 레이블 없는 심플 다크로 폴백
 tileLayer.on('tileerror', () => {
   map.removeLayer(tileLayer);
   L.tileLayer(
@@ -44,78 +34,34 @@ tileLayer.on('tileerror', () => {
   ).addTo(map);
 });
 
-/* ─── Custom markers ─────────────────────────────────────────────────── */
-function makeHomeIcon() {
-  return L.divIcon({
-    className: '',
-    html: `
-      <div style="position:relative;width:22px;height:22px;">
-        <div class="home-marker-ring"></div>
-        <div style="
-          width:22px;height:22px;
-          background:#00d4ff;
-          border-radius:50%;
-          border:3px solid #fff;
-          box-shadow:0 0 12px rgba(0,212,255,0.8);
-          display:flex;align-items:center;justify-content:center;
-          position:relative;z-index:2;
-        ">
-          <svg width="10" height="10" viewBox="0 0 14 14" fill="white">
-            <path d="M7 1L1 6h2v7h3V9h2v4h3V6h2L7 1z"/>
-          </svg>
-        </div>
-      </div>`,
-    iconSize: [22, 22],
-    iconAnchor: [11, 11],
-    popupAnchor: [0, -14],
-  });
+/* ─── IP 유효성 검사 ──────────────────────────────────────────────────── */
+function isValidIp(ip) {
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(ip) &&
+    ip.split('.').every(n => Number(n) >= 0 && Number(n) <= 255);
 }
 
-function makeServerIcon(color, ping) {
-  const size = ping < 60 ? 14 : ping < 120 ? 12 : 10;
-  return L.divIcon({
-    className: '',
-    html: `<div style="
-      width:${size}px;height:${size}px;
-      background:${color};
-      border-radius:50%;
-      border:2px solid rgba(255,255,255,0.25);
-      box-shadow:0 0 8px ${color}88;
-      cursor:pointer;
-    "></div>`,
-    iconSize: [size, size],
-    iconAnchor: [size / 2, size / 2],
-    popupAnchor: [0, -(size / 2 + 4)],
-  });
+/* ─── IP 지오코딩 (ip-api.com 무료 API) ────────────────────────────── */
+async function geolocateIp(ip) {
+  try {
+    const res = await fetch(
+      `http://ip-api.com/json/${ip}?fields=status,country,regionName,city,lat,lon,isp,query`,
+      { signal: AbortSignal.timeout(6000) }
+    );
+    const data = await res.json();
+    if (data.status === 'success') {
+      return {
+        lat:     data.lat,
+        lng:     data.lon,
+        country: data.country,
+        city:    data.city || data.regionName || '알 수 없음',
+        isp:     data.isp || '',
+      };
+    }
+  } catch (_) {}
+  return null;
 }
 
-/* ─── Home marker & radius circle ───────────────────────────────────── */
-let homeMarker = L.marker(state.homeLatLng, {
-  icon: makeHomeIcon(),
-  draggable: true,
-  zIndexOffset: 1000,
-}).addTo(map).bindPopup('<b>내 위치</b><br/>드래그하여 이동');
-
-let radiusCircle = L.circle(state.homeLatLng, {
-  radius: state.radiusKm * 1000,
-  color: '#00d4ff',
-  fillColor: '#00d4ff',
-  fillOpacity: 0.05,
-  weight: 1.5,
-  dashArray: '6 4',
-}).addTo(map);
-
-homeMarker.on('dragend', () => {
-  const latlng = homeMarker.getLatLng();
-  state.homeLatLng = [latlng.lat, latlng.lng];
-  radiusCircle.setLatLng(latlng);
-  updateLocationText();
-  updateAllServerMarkers();
-  renderServerList();
-  updateStats();
-});
-
-/* ─── Geo distance (Haversine) ───────────────────────────────────────── */
+/* ─── Haversine 거리 ─────────────────────────────────────────────────── */
 function haversineKm(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -128,269 +74,497 @@ function haversineKm(lat1, lon1, lat2, lon2) {
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-/* ─── Server filter logic ────────────────────────────────────────────── */
-function getServerStatus(server) {
-  if (server.whitelisted) return 'whitelisted';
-  if (!state.filterEnabled) return 'allowed';
-  const dist = haversineKm(
-    state.homeLatLng[0], state.homeLatLng[1],
-    server.lat, server.lng
-  );
-  const inRadius = dist <= state.radiusKm;
-  const pingOk = !state.strictMode || server.ping <= state.maxPing;
-  return inRadius && pingOk ? 'allowed' : 'blocked';
-}
-
-function serverColor(status) {
-  return { allowed: '#22c55e', blocked: '#ef4444', whitelisted: '#f97316' }[status];
-}
-
-/* ─── Simulated ping based on distance ───────────────────────────────── */
+/* ─── 핑 추정 (거리 기반) ────────────────────────────────────────────── */
 function estimatePing(lat, lng) {
   const dist = haversineKm(state.homeLatLng[0], state.homeLatLng[1], lat, lng);
-  const base = Math.round(dist / 40 + Math.random() * 20 + 5);
-  return Math.min(base, 999);
+  return Math.min(Math.round(dist / 40 + Math.random() * 15 + 5), 999);
 }
 
-/* ─── Sample server data (game server regions) ───────────────────────── */
-const SERVER_POOL = [
-  { name: 'Seoul KR-1',     lat: 37.56, lng: 126.97 },
-  { name: 'Seoul KR-2',     lat: 37.49, lng: 127.02 },
-  { name: 'Tokyo JP-1',     lat: 35.68, lng: 139.69 },
-  { name: 'Tokyo JP-2',     lat: 35.71, lng: 139.72 },
-  { name: 'Singapore SG-1', lat: 1.35,  lng: 103.82 },
-  { name: 'Singapore SG-2', lat: 1.29,  lng: 103.85 },
-  { name: 'Hong Kong HK-1', lat: 22.39, lng: 114.10 },
-  { name: 'Sydney AU-1',    lat: -33.87, lng: 151.21 },
-  { name: 'Frankfurt EU-1', lat: 50.11,  lng: 8.68  },
-  { name: 'Amsterdam EU-2', lat: 52.37,  lng: 4.90  },
-  { name: 'London EU-3',    lat: 51.51,  lng: -0.13 },
-  { name: 'Paris EU-4',     lat: 48.86,  lng: 2.35  },
-  { name: 'N.Virginia US-1',lat: 38.95,  lng: -77.45 },
-  { name: 'Oregon US-2',    lat: 45.52,  lng: -122.67 },
-  { name: 'São Paulo BR-1', lat: -23.55, lng: -46.63 },
-  { name: 'Mumbai IN-1',    lat: 19.08,  lng: 72.88  },
-  { name: 'Bahrain ME-1',   lat: 26.05,  lng: 50.55  },
-  { name: 'Cape Town AF-1', lat: -33.93, lng: 18.42  },
-];
-
-let poolIndex = 0;
-
-function addServerFromPool() {
-  if (poolIndex >= SERVER_POOL.length) return;
-  const template = SERVER_POOL[poolIndex++];
-  const ping = estimatePing(template.lat, template.lng);
-  addServer({
-    name: template.name,
-    lat: template.lat,
-    lng: template.lng,
-    ping,
+/* ════════════════════════════════════════════════════════════════════════
+   홈 마커 & 반경 원
+   ════════════════════════════════════════════════════════════════════════ */
+function makeHomeIcon() {
+  return L.divIcon({
+    className: '',
+    html: `<div style="position:relative;width:22px;height:22px;">
+      <div class="home-marker-ring"></div>
+      <div style="width:22px;height:22px;background:#00d4ff;border-radius:50%;
+        border:3px solid #fff;box-shadow:0 0 12px rgba(0,212,255,.8);
+        display:flex;align-items:center;justify-content:center;position:relative;z-index:2;">
+        <svg width="10" height="10" viewBox="0 0 14 14" fill="white">
+          <path d="M7 1L1 6h2v7h3V9h2v4h3V6h2L7 1z"/>
+        </svg>
+      </div>
+    </div>`,
+    iconSize: [22, 22], iconAnchor: [11, 11], popupAnchor: [0, -14],
   });
 }
 
-/* ─── Add / remove servers ───────────────────────────────────────────── */
-function addServer({ name, lat, lng, ping }) {
-  const id = state.nextId++;
-  const server = { id, name, lat, lng, ping, whitelisted: false, marker: null };
-  server.marker = createMarker(server);
-  state.servers.push(server);
+const homeMarker = L.marker(state.homeLatLng, {
+  icon: makeHomeIcon(), draggable: true, zIndexOffset: 1000,
+}).addTo(map).bindPopup('<b>내 위치</b><br/>드래그하여 이동');
+
+const radiusCircle = L.circle(state.homeLatLng, {
+  radius: state.radiusKm * 1000,
+  color: '#00d4ff', fillColor: '#00d4ff',
+  fillOpacity: 0.05, weight: 1.5, dashArray: '6 4',
+}).addTo(map);
+
+homeMarker.on('drag', () => {
+  const ll = homeMarker.getLatLng();
+  radiusCircle.setLatLng(ll);
+  // IP 연결선 실시간 갱신
+  state.savedIPs.forEach(entry => {
+    if (entry.line) entry.line.setLatLngs([ll, [entry.lat, entry.lng]]);
+  });
+});
+
+homeMarker.on('dragend', () => {
+  const ll = homeMarker.getLatLng();
+  state.homeLatLng = [ll.lat, ll.lng];
+  updateLocationText();
+  updateAllServerMarkers();
+  // IP 핑 재추정 후 렌더
+  state.savedIPs.forEach(e => {
+    e.ping = estimatePing(e.lat, e.lng);
+    updateIpMarker(e);
+  });
+  renderIpList();
   renderServerList();
   updateStats();
-  return server;
-}
+});
 
-function createMarker(server) {
-  const status = getServerStatus(server);
-  const color = serverColor(status);
-  const marker = L.marker([server.lat, server.lng], {
-    icon: makeServerIcon(color, server.ping),
-    zIndexOffset: 500,
-  }).addTo(map);
-
-  marker.on('click', () => {
-    const s = getServerStatus(server);
-    marker.bindPopup(buildPopupHtml(server, s)).openPopup();
+/* ════════════════════════════════════════════════════════════════════════
+   상대방 IP 마커 & 연결선
+   ════════════════════════════════════════════════════════════════════════ */
+function makePlayerIcon(ping, blocked) {
+  const color = blocked    ? '#6b7280'
+              : ping < 80  ? '#a78bfa'
+              : ping < 150 ? '#c084fc'
+              :              '#7c3aed';
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:13px;height:13px;background:${color};
+      transform:rotate(45deg);
+      border:2px solid rgba(255,255,255,.25);
+      box-shadow:0 0 8px ${color}99;cursor:pointer;
+    "></div>`,
+    iconSize: [13, 13], iconAnchor: [6, 6], popupAnchor: [0, -10],
   });
-
-  return marker;
 }
 
-function buildPopupHtml(server, status) {
-  const pingClass = server.ping < 60 ? 'good' : server.ping < 120 ? 'ok' : 'bad';
-  const dist = Math.round(
-    haversineKm(state.homeLatLng[0], state.homeLatLng[1], server.lat, server.lng)
-  );
+function makeConnectionLine(entry) {
+  const color = entry.blocked ? '#6b7280'
+              : entry.ping < 80  ? '#a78bfa'
+              : entry.ping < 150 ? '#f97316'
+              :                    '#ef4444';
+  return L.polyline([state.homeLatLng, [entry.lat, entry.lng]], {
+    color, weight: 1.5, opacity: entry.blocked ? 0.25 : 0.55,
+    dashArray: '7 5', className: 'player-line',
+  }).addTo(map);
+}
+
+function updateIpMarker(entry) {
+  if (entry.marker) entry.marker.setIcon(makePlayerIcon(entry.ping, entry.blocked));
+  if (entry.line) {
+    map.removeLayer(entry.line);
+    entry.line = makeConnectionLine(entry);
+  }
+}
+
+function buildIpPopup(entry) {
+  const pc = entry.ping < 80 ? '#22c55e' : entry.ping < 150 ? '#f97316' : '#ef4444';
+  const dist = Math.round(haversineKm(state.homeLatLng[0], state.homeLatLng[1], entry.lat, entry.lng));
   return `
-    <div style="min-width:140px;">
-      <div style="font-weight:700;font-size:13px;margin-bottom:6px;">${server.name}</div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:4px;">
-        <span>핑</span>
-        <span class="ping-value ping-${pingClass}" style="color:${
-          pingClass === 'good' ? '#22c55e' : pingClass === 'ok' ? '#f97316' : '#ef4444'
-        };font-weight:600;">${server.ping}ms</span>
+    <div style="min-width:160px;">
+      <div style="font-weight:700;font-size:13px;color:#c4b5fd;margin-bottom:6px;">${entry.name}</div>
+      <div style="font-family:monospace;font-size:11px;color:#64748b;margin-bottom:6px;">${entry.ip}</div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:3px;">
+        <span>위치</span><span>${entry.city}, ${entry.country}</span>
       </div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:4px;">
-        <span>거리</span>
-        <span>${dist.toLocaleString()}km</span>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:3px;">
+        <span>거리</span><span>${dist.toLocaleString()}km</span>
       </div>
       <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:8px;">
-        <span>상태</span>
-        <span style="color:${serverColor(status)};font-weight:600;text-transform:uppercase;font-size:10px;">${
-          status === 'allowed' ? '허용' : status === 'blocked' ? '차단' : '화이트리스트'
-        }</span>
+        <span>핑</span><span style="color:${pc};font-weight:700;">${entry.ping}ms</span>
       </div>
-      <div style="display:flex;gap:4px;">
-        <button onclick="toggleWhitelist(${server.id})" style="flex:1;padding:4px;font-size:9px;background:#1a1e29;border:1px solid rgba(249,115,22,0.3);color:#f97316;border-radius:5px;cursor:pointer;font-weight:700;">
-          ${server.whitelisted ? '화이트리스트 해제' : '화이트리스트'}
+      <div style="display:flex;gap:5px;">
+        <button onclick="blockIp(${entry.id})"
+          style="flex:1;padding:4px;font-size:9px;background:#1a1e29;
+          border:1px solid rgba(239,68,68,.3);color:#ef4444;
+          border-radius:5px;cursor:pointer;font-weight:700;">
+          ${entry.blocked ? '차단 해제' : '차단'}
         </button>
-        <button onclick="removeServer(${server.id})" style="flex:1;padding:4px;font-size:9px;background:#1a1e29;border:1px solid #232737;color:#64748b;border-radius:5px;cursor:pointer;font-weight:700;">
+        <button onclick="deleteIp(${entry.id})"
+          style="flex:1;padding:4px;font-size:9px;background:#1a1e29;
+          border:1px solid #232737;color:#64748b;
+          border-radius:5px;cursor:pointer;font-weight:700;">
           삭제
         </button>
       </div>
     </div>`;
 }
 
-function updateMarker(server) {
-  const status = getServerStatus(server);
-  const color = serverColor(status);
-  if (server.marker) {
-    server.marker.setIcon(makeServerIcon(color, server.ping));
+/* ─── IP 등록 ─────────────────────────────────────────────────────────── */
+async function registerIp(rawIp, customName) {
+  const ip = rawIp.trim();
+  const msgEl = document.getElementById('ipFormMsg');
+  const btn   = document.getElementById('btnAddIp');
+
+  if (!isValidIp(ip)) {
+    setMsg('유효한 IPv4 주소를 입력하세요', 'err');
+    document.getElementById('ipInput').classList.add('error');
+    return;
   }
+  if (state.savedIPs.find(e => e.ip === ip)) {
+    setMsg('이미 등록된 IP입니다', 'err');
+    return;
+  }
+
+  setMsg('위치 조회 중...', 'loading');
+  btn.disabled = true;
+
+  const geo = await geolocateIp(ip);
+  btn.disabled = false;
+
+  if (!geo) {
+    setMsg('위치를 찾을 수 없습니다 (사설 IP거나 조회 실패)', 'err');
+    return;
+  }
+
+  const ping = estimatePing(geo.lat, geo.lng);
+  const name = customName.trim() || ip;
+
+  const entry = {
+    id:      state.nextIpId++,
+    ip,
+    name,
+    lat:     geo.lat,
+    lng:     geo.lng,
+    country: geo.country,
+    city:    geo.city,
+    isp:     geo.isp,
+    ping,
+    blocked: false,
+    marker:  null,
+    line:    null,
+  };
+
+  // 지도 마커 & 연결선 생성
+  entry.line = makeConnectionLine(entry);
+  entry.marker = L.marker([entry.lat, entry.lng], {
+    icon: makePlayerIcon(ping, false),
+    zIndexOffset: 800,
+  }).addTo(map);
+  entry.marker.on('click', () => {
+    entry.marker.bindPopup(buildIpPopup(entry)).openPopup();
+  });
+
+  state.savedIPs.push(entry);
+
+  // 지도 해당 위치로 이동
+  map.flyTo([entry.lat, entry.lng], 6, { duration: 1 });
+
+  // 폼 초기화
+  document.getElementById('ipInput').value    = '';
+  document.getElementById('ipNameInput').value = '';
+  document.getElementById('ipInput').classList.remove('error');
+  setMsg(`✓ ${entry.city}, ${entry.country} 등록됨`, 'ok');
+  setTimeout(() => setMsg('', ''), 3000);
+
+  renderIpList();
+  updateStats();
+}
+
+function setMsg(text, type) {
+  const el = document.getElementById('ipFormMsg');
+  el.textContent  = text;
+  el.className    = `ip-form-msg ${type}`;
+}
+
+/* ─── IP 전역 액션 ───────────────────────────────────────────────────── */
+window.blockIp = function (id) {
+  const entry = state.savedIPs.find(e => e.id === id);
+  if (!entry) return;
+  entry.blocked = !entry.blocked;
+  updateIpMarker(entry);
+  renderIpList();
+  map.closePopup();
+};
+
+window.deleteIp = function (id) {
+  const idx = state.savedIPs.findIndex(e => e.id === id);
+  if (idx === -1) return;
+  const entry = state.savedIPs[idx];
+  if (entry.marker) map.removeLayer(entry.marker);
+  if (entry.line)   map.removeLayer(entry.line);
+  state.savedIPs.splice(idx, 1);
+  renderIpList();
+  updateStats();
+  map.closePopup();
+};
+
+window.focusIp = function (id) {
+  const entry = state.savedIPs.find(e => e.id === id);
+  if (!entry) return;
+  map.flyTo([entry.lat, entry.lng], 6, { duration: 0.9 });
+  setTimeout(() => {
+    entry.marker.bindPopup(buildIpPopup(entry)).openPopup();
+  }, 950);
+};
+
+window.openRename = function (id) {
+  state.renameTarget = id;
+  const entry = state.savedIPs.find(e => e.id === id);
+  if (!entry) return;
+  document.getElementById('renameInput').value = entry.name;
+  document.getElementById('renameModal').style.display = 'flex';
+  document.getElementById('renameInput').select();
+};
+
+/* ─── IP 목록 렌더링 ─────────────────────────────────────────────────── */
+function renderIpList() {
+  const list  = document.getElementById('ipList');
+  const count = document.getElementById('ipListCount');
+  count.textContent = `${state.savedIPs.length}개`;
+  document.getElementById('savedIpCount').textContent = state.savedIPs.length;
+
+  if (state.savedIPs.length === 0) {
+    list.innerHTML = `
+      <div class="empty-state ip-empty">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <rect x="4" y="8" width="24" height="16" rx="3" stroke="#444" stroke-width="1.5"/>
+          <path d="M10 14h12M10 18h8" stroke="#444" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <p>IP를 입력하여<br/>상대방을 등록하세요</p>
+      </div>`;
+    return;
+  }
+
+  list.innerHTML = state.savedIPs.map(e => {
+    const pc  = e.ping < 80 ? 'good' : e.ping < 150 ? 'ok' : 'bad';
+    const dist = Math.round(haversineKm(state.homeLatLng[0], state.homeLatLng[1], e.lat, e.lng));
+    return `
+      <div class="ip-card${e.blocked ? ' ip-blocked' : ''}" onclick="focusIp(${e.id})">
+        <div class="ip-card-top">
+          <span class="ip-card-name" title="${e.name}">${e.name}</span>
+          <span class="ip-country-badge">${e.country}</span>
+        </div>
+        <div class="ip-addr">⌗ ${e.ip}</div>
+        <div class="ip-meta">
+          <span>${e.city} · ${dist.toLocaleString()}km</span>
+          <span class="ping-${pc}">${e.ping}ms</span>
+        </div>
+        <div class="ip-card-actions">
+          <button class="ip-act-btn rename-btn"
+            onclick="event.stopPropagation();openRename(${e.id})">이름변경</button>
+          <button class="ip-act-btn ${e.blocked ? 'unblock-btn' : 'block-btn'}"
+            onclick="event.stopPropagation();blockIp(${e.id})">
+            ${e.blocked ? '차단해제' : '차단'}
+          </button>
+          <button class="ip-act-btn del-btn"
+            onclick="event.stopPropagation();deleteIp(${e.id})">삭제</button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   게임 서버 (기존 기능)
+   ════════════════════════════════════════════════════════════════════════ */
+function makeServerIcon(color, ping) {
+  const size = ping < 60 ? 14 : ping < 120 ? 12 : 10;
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:${size}px;height:${size}px;background:${color};
+      border-radius:50%;border:2px solid rgba(255,255,255,.2);
+      box-shadow:0 0 8px ${color}88;cursor:pointer;
+    "></div>`,
+    iconSize: [size, size], iconAnchor: [size/2, size/2], popupAnchor: [0, -(size/2+4)],
+  });
+}
+
+function getServerStatus(server) {
+  if (!state.filterEnabled) return 'allowed';
+  const dist = haversineKm(state.homeLatLng[0], state.homeLatLng[1], server.lat, server.lng);
+  const inRadius = dist <= state.radiusKm;
+  const pingOk   = !state.strictMode || server.ping <= state.maxPing;
+  return inRadius && pingOk ? 'allowed' : 'blocked';
+}
+function serverColor(status) {
+  return status === 'allowed' ? '#22c55e' : '#ef4444';
+}
+
+function buildServerPopup(server, status) {
+  const pc   = server.ping < 60 ? '#22c55e' : server.ping < 120 ? '#f97316' : '#ef4444';
+  const dist = Math.round(haversineKm(state.homeLatLng[0], state.homeLatLng[1], server.lat, server.lng));
+  return `
+    <div style="min-width:140px;">
+      <div style="font-weight:700;font-size:13px;margin-bottom:6px;">${server.name}</div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:3px;">
+        <span>핑</span><span style="color:${pc};font-weight:600;">${server.ping}ms</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:3px;">
+        <span>거리</span><span>${dist.toLocaleString()}km</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:8px;">
+        <span>상태</span>
+        <span style="color:${serverColor(status)};font-weight:600;font-size:10px;text-transform:uppercase;">
+          ${status === 'allowed' ? '허용' : '차단'}
+        </span>
+      </div>
+      <button onclick="removeServer(${server.id})"
+        style="width:100%;padding:4px;font-size:9px;background:#1a1e29;
+        border:1px solid #232737;color:#64748b;border-radius:5px;cursor:pointer;font-weight:700;">
+        삭제
+      </button>
+    </div>`;
+}
+
+function addServer({ name, lat, lng, ping }) {
+  const id     = state.nextServerId++;
+  const server = { id, name, lat, lng, ping, marker: null };
+  const status = getServerStatus(server);
+  const marker = L.marker([lat, lng], {
+    icon: makeServerIcon(serverColor(status), ping), zIndexOffset: 500,
+  }).addTo(map);
+  marker.on('click', () => {
+    marker.bindPopup(buildServerPopup(server, getServerStatus(server))).openPopup();
+  });
+  server.marker = marker;
+  state.servers.push(server);
+  renderServerList();
+  updateStats();
+  return server;
+}
+
+function updateServerMarker(server) {
+  const status = getServerStatus(server);
+  if (server.marker) server.marker.setIcon(makeServerIcon(serverColor(status), server.ping));
 }
 
 function updateAllServerMarkers() {
   state.servers.forEach(s => {
     s.ping = estimatePing(s.lat, s.lng);
-    updateMarker(s);
+    updateServerMarker(s);
   });
 }
-
-/* ─── Exposed global actions (called from popup buttons) ─────────────── */
-window.toggleWhitelist = function (id) {
-  const server = state.servers.find(s => s.id === id);
-  if (!server) return;
-  server.whitelisted = !server.whitelisted;
-  updateMarker(server);
-  renderServerList();
-  updateStats();
-  map.closePopup();
-};
 
 window.removeServer = function (id) {
   const idx = state.servers.findIndex(s => s.id === id);
   if (idx === -1) return;
-  const server = state.servers[idx];
-  if (server.marker) map.removeLayer(server.marker);
+  if (state.servers[idx].marker) map.removeLayer(state.servers[idx].marker);
   state.servers.splice(idx, 1);
   renderServerList();
   updateStats();
   map.closePopup();
 };
 
-/* ─── Server list render ─────────────────────────────────────────────── */
+window.focusServer = function (id) {
+  const s = state.servers.find(s => s.id === id);
+  if (!s) return;
+  map.flyTo([s.lat, s.lng], 6, { duration: 0.8 });
+  setTimeout(() => s.marker.bindPopup(buildServerPopup(s, getServerStatus(s))).openPopup(), 900);
+};
+
+const SERVER_POOL = [
+  { name: 'Seoul KR-1',      lat: 37.56,  lng: 126.97 },
+  { name: 'Seoul KR-2',      lat: 37.49,  lng: 127.02 },
+  { name: 'Tokyo JP-1',      lat: 35.68,  lng: 139.69 },
+  { name: 'Tokyo JP-2',      lat: 35.71,  lng: 139.72 },
+  { name: 'Singapore SG-1',  lat: 1.35,   lng: 103.82 },
+  { name: 'Hong Kong HK-1',  lat: 22.39,  lng: 114.10 },
+  { name: 'Sydney AU-1',     lat: -33.87, lng: 151.21 },
+  { name: 'Frankfurt EU-1',  lat: 50.11,  lng: 8.68   },
+  { name: 'Amsterdam EU-2',  lat: 52.37,  lng: 4.90   },
+  { name: 'London EU-3',     lat: 51.51,  lng: -0.13  },
+  { name: 'N.Virginia US-1', lat: 38.95,  lng: -77.45 },
+  { name: 'Oregon US-2',     lat: 45.52,  lng: -122.67},
+  { name: 'São Paulo BR-1',  lat: -23.55, lng: -46.63 },
+  { name: 'Mumbai IN-1',     lat: 19.08,  lng: 72.88  },
+];
+let poolIndex = 0;
+
+function addServerFromPool() {
+  if (poolIndex >= SERVER_POOL.length) return;
+  const t = SERVER_POOL[poolIndex++];
+  addServer({ name: t.name, lat: t.lat, lng: t.lng, ping: estimatePing(t.lat, t.lng) });
+}
+
 function renderServerList() {
   const list = document.getElementById('serverList');
-  const tab = state.activeTab;
+  const tab  = state.activeTab;
 
   let servers = state.servers.map(s => ({ ...s, status: getServerStatus(s) }));
-
   if (tab === 'allowed') servers = servers.filter(s => s.status === 'allowed');
-  else if (tab === 'blocked') servers = servers.filter(s => s.status === 'blocked');
-  else if (tab === 'whitelist') servers = servers.filter(s => s.whitelisted);
+  if (tab === 'blocked')  servers = servers.filter(s => s.status === 'blocked');
 
   if (servers.length === 0) {
     list.innerHTML = `
       <div class="empty-state">
-        <svg width="40" height="40" viewBox="0 0 40 40" fill="none">
-          <circle cx="20" cy="20" r="18" stroke="#444" stroke-width="2"/>
-          <path d="M13 20h14M20 13v14" stroke="#444" stroke-width="2" stroke-linecap="round"/>
+        <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
+          <circle cx="18" cy="18" r="16" stroke="#444" stroke-width="1.5"/>
+          <path d="M11 18h14M18 11v14" stroke="#444" stroke-width="1.5" stroke-linecap="round"/>
         </svg>
-        <p>${tab === 'all' ? '서버를 추가하려면<br/>+ 버튼을 클릭하세요' : '해당하는 서버가 없습니다'}</p>
+        <p>${tab === 'all' ? '+ 버튼으로 서버 추가' : '해당 서버 없음'}</p>
       </div>`;
     return;
   }
 
   list.innerHTML = servers.map(s => {
-    const pingClass = s.ping < 60 ? 'good' : s.ping < 120 ? 'ok' : 'bad';
-    const dist = Math.round(
-      haversineKm(state.homeLatLng[0], state.homeLatLng[1], s.lat, s.lng)
-    );
-    const badgeClass = `badge-${s.status}`;
-    const badgeLabel = s.status === 'allowed' ? '허용' : s.status === 'blocked' ? '차단' : '화이트리스트';
-
+    const pc   = s.ping < 60 ? 'good' : s.ping < 120 ? 'ok' : 'bad';
+    const dist = Math.round(haversineKm(state.homeLatLng[0], state.homeLatLng[1], s.lat, s.lng));
     return `
-      <div class="server-card ${s.status}" data-id="${s.id}" onclick="focusServer(${s.id})">
+      <div class="server-card ${s.status}" onclick="focusServer(${s.id})">
         <div class="server-card-header">
           <span class="server-name">${s.name}</span>
-          <span class="server-status-badge ${badgeClass}">${badgeLabel}</span>
+          <span class="server-status-badge badge-${s.status}">${s.status === 'allowed' ? '허용' : '차단'}</span>
         </div>
         <div class="server-meta">
           <span>${dist.toLocaleString()}km</span>
-          <span class="ping-value ping-${pingClass}">${s.ping}ms</span>
+          <span class="ping-${pc}">${s.ping}ms</span>
         </div>
         <div class="server-actions">
-          <button class="action-btn whitelist" onclick="event.stopPropagation();toggleWhitelist(${s.id})">
-            ${s.whitelisted ? '해제' : '화이트리스트'}
-          </button>
           <button class="action-btn remove" onclick="event.stopPropagation();removeServer(${s.id})">삭제</button>
         </div>
       </div>`;
   }).join('');
 }
 
-window.focusServer = function (id) {
-  const server = state.servers.find(s => s.id === id);
-  if (!server) return;
-  map.flyTo([server.lat, server.lng], 6, { duration: 0.8 });
-  const status = getServerStatus(server);
-  setTimeout(() => {
-    server.marker.bindPopup(buildPopupHtml(server, status)).openPopup();
-  }, 900);
-};
-
-/* ─── Stats update ───────────────────────────────────────────────────── */
+/* ─── 통계 ───────────────────────────────────────────────────────────── */
 function updateStats() {
-  const total = state.servers.length;
-  const statuses = state.servers.map(s => getServerStatus(s));
-  const allowed = statuses.filter(s => s === 'allowed' || s === 'whitelisted').length;
-  const blocked = statuses.filter(s => s === 'blocked').length;
-  const pings = state.servers.map(s => s.ping);
-  const avg = pings.length ? Math.round(pings.reduce((a, b) => a + b, 0) / pings.length) : null;
-
-  document.getElementById('totalServers').textContent = total;
+  const total   = state.servers.length;
+  const allowed = state.servers.filter(s => getServerStatus(s) === 'allowed').length;
+  const blocked = total - allowed;
+  document.getElementById('totalServers').textContent   = total;
   document.getElementById('allowedServers').textContent = allowed;
   document.getElementById('blockedServers').textContent = blocked;
-  document.getElementById('avgPing').textContent = avg !== null ? `${avg}ms` : '—';
+  document.getElementById('savedIpCount').textContent   = state.savedIPs.length;
 }
 
-/* ─── Location display ───────────────────────────────────────────────── */
+/* ─── 위치 텍스트 ─────────────────────────────────────────────────────── */
 function updateLocationText() {
   const [lat, lng] = state.homeLatLng;
-  document.getElementById('locationText').textContent =
-    `${lat.toFixed(3)}, ${lng.toFixed(3)}`;
+  document.getElementById('locationText').textContent = `${lat.toFixed(3)}, ${lng.toFixed(3)}`;
 }
 
 function geolocate() {
-  if (!navigator.geolocation) {
+  if (!navigator.geolocation) { updateLocationText(); return; }
+  navigator.geolocation.getCurrentPosition(pos => {
+    state.homeLatLng = [pos.coords.latitude, pos.coords.longitude];
+    homeMarker.setLatLng(state.homeLatLng);
+    radiusCircle.setLatLng(state.homeLatLng);
+    map.flyTo(state.homeLatLng, 5);
     updateLocationText();
-    return;
-  }
-  navigator.geolocation.getCurrentPosition(
-    (pos) => {
-      state.homeLatLng = [pos.coords.latitude, pos.coords.longitude];
-      homeMarker.setLatLng(state.homeLatLng);
-      radiusCircle.setLatLng(state.homeLatLng);
-      map.flyTo(state.homeLatLng, 5);
-      updateLocationText();
-      updateAllServerMarkers();
-      renderServerList();
-      updateStats();
-    },
-    () => updateLocationText()
-  );
+    updateAllServerMarkers();
+    renderServerList();
+    updateStats();
+  }, () => updateLocationText());
 }
 
-/* ─── Radius update ──────────────────────────────────────────────────── */
+/* ─── 반경 업데이트 ──────────────────────────────────────────────────── */
 function updateRadius(km) {
   state.radiusKm = km;
   radiusCircle.setRadius(km * 1000);
@@ -400,84 +574,82 @@ function updateRadius(km) {
   updateStats();
 }
 
-/* ─── Ping simulation refresh ────────────────────────────────────────── */
-function simulatePingUpdate() {
-  state.servers.forEach(server => {
-    const drift = Math.floor((Math.random() - 0.5) * 10);
-    server.ping = Math.max(1, Math.min(999, server.ping + drift));
-    updateMarker(server);
+/* ─── 핑 드리프트 (5초) ─────────────────────────────────────────────── */
+function driftPings() {
+  state.servers.forEach(s => {
+    s.ping = Math.max(1, Math.min(999, s.ping + Math.round((Math.random() - 0.5) * 10)));
+    updateServerMarker(s);
+  });
+  state.savedIPs.forEach(e => {
+    e.ping = Math.max(1, Math.min(999, e.ping + Math.round((Math.random() - 0.5) * 8)));
+    if (e.marker) e.marker.setIcon(makePlayerIcon(e.ping, e.blocked));
   });
   renderServerList();
-  updateStats();
+  renderIpList();
 }
 
-/* ─── Event wiring ───────────────────────────────────────────────────── */
-document.getElementById('filterToggle').addEventListener('change', (e) => {
+/* ════════════════════════════════════════════════════════════════════════
+   이벤트 바인딩
+   ════════════════════════════════════════════════════════════════════════ */
+
+// 필터 토글
+document.getElementById('filterToggle').addEventListener('change', e => {
   state.filterEnabled = e.target.checked;
-  const dot = document.getElementById('statusDot');
-  const text = document.getElementById('statusText');
-  if (state.filterEnabled) {
-    dot.classList.remove('inactive');
-    text.textContent = '활성화';
-  } else {
-    dot.classList.add('inactive');
-    text.textContent = '비활성화';
-  }
+  document.getElementById('statusDot').classList.toggle('inactive', !state.filterEnabled);
+  document.getElementById('statusText').textContent = state.filterEnabled ? '활성화' : '비활성화';
   updateAllServerMarkers();
   renderServerList();
   updateStats();
 });
 
-document.getElementById('radiusSlider').addEventListener('input', (e) => {
+// 반경 슬라이더
+document.getElementById('radiusSlider').addEventListener('input', e => {
   updateRadius(Number(e.target.value));
 });
 
-document.getElementById('maxPing').addEventListener('input', (e) => {
+// 최대 핑
+document.getElementById('maxPing').addEventListener('input', e => {
   state.maxPing = Number(e.target.value) || 80;
-  if (state.strictMode) {
-    updateAllServerMarkers();
-    renderServerList();
-    updateStats();
-  }
+  if (state.strictMode) { updateAllServerMarkers(); renderServerList(); updateStats(); }
 });
 
-document.getElementById('strictMode').addEventListener('change', (e) => {
+// 엄격 모드
+document.getElementById('strictMode').addEventListener('change', e => {
   state.strictMode = e.target.checked;
   updateAllServerMarkers();
   renderServerList();
   updateStats();
 });
 
+// 위치 새로고침
 document.getElementById('refreshLocation').addEventListener('click', geolocate);
 
+// 서버 추가 버튼
 document.getElementById('btnAddServer').addEventListener('click', () => {
-  if (poolIndex >= SERVER_POOL.length) {
-    alert('더 추가할 수 있는 샘플 서버가 없습니다.');
-    return;
-  }
+  if (poolIndex >= SERVER_POOL.length) return;
   addServerFromPool();
 });
 
+// 서버 전체 삭제
 document.getElementById('btnClearAll').addEventListener('click', () => {
   state.servers.forEach(s => { if (s.marker) map.removeLayer(s.marker); });
   state.servers = [];
   poolIndex = 0;
-  state.nextId = 1;
+  state.nextServerId = 1;
   renderServerList();
   updateStats();
 });
 
+// 맞춤 보기
 document.getElementById('btnFitBounds').addEventListener('click', () => {
-  if (state.servers.length === 0) {
-    map.flyTo(state.homeLatLng, 4);
-    return;
-  }
+  const all = [...state.servers, ...state.savedIPs];
+  if (all.length === 0) { map.flyTo(state.homeLatLng, 4); return; }
   const bounds = L.latLngBounds([state.homeLatLng]);
-  state.servers.forEach(s => bounds.extend([s.lat, s.lng]));
+  all.forEach(s => bounds.extend([s.lat, s.lng]));
   map.flyToBounds(bounds, { padding: [40, 40] });
 });
 
-/* Tab switching */
+// 서버 탭
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -487,332 +659,68 @@ document.querySelectorAll('.tab').forEach(tab => {
   });
 });
 
-/* ─── Double-click on map to add custom server ───────────────────────── */
-map.on('dblclick', (e) => {
+// 지도 더블클릭 → 커스텀 서버 추가
+map.on('dblclick', e => {
   const { lat, lng } = e.latlng;
-  const ping = estimatePing(lat, lng);
-  const name = `Custom ${lat.toFixed(2)}, ${lng.toFixed(2)}`;
-  addServer({ name, lat, lng, ping });
+  addServer({ name: `Custom ${lat.toFixed(2)}, ${lng.toFixed(2)}`, lat, lng, ping: estimatePing(lat, lng) });
 });
 
-/* ════════════════════════════════════════════════════════════════════════
-   게임 세션 — 상대방 IP / 위치
-   ════════════════════════════════════════════════════════════════════════ */
+// ── IP 폼 입력 ──
+document.getElementById('ipInput').addEventListener('input', () => {
+  document.getElementById('ipInput').classList.remove('error');
+});
 
-/* ─── 플레이어 풀 (지역별 닉네임 + IP 대역 + 좌표) ─────────────────────── */
-const PLAYER_POOL = [
-  { nick: 'xXSn1perKingXx',  region: '한국',    city: '서울',      lat: 37.56,  lng: 126.97, ipPfx: '175.223' },
-  { nick: 'BattleKR_Daejin', region: '한국',    city: '부산',      lat: 35.18,  lng: 129.07, ipPfx: '110.70'  },
-  { nick: 'NinjaJP_Reika',   region: '일본',    city: '도쿄',      lat: 35.68,  lng: 139.69, ipPfx: '60.100'  },
-  { nick: 'OsakaGamer07',    region: '일본',    city: '오사카',    lat: 34.69,  lng: 135.50, ipPfx: '49.212'  },
-  { nick: 'ShanghaiPro99',   region: '중국',    city: '상하이',    lat: 31.23,  lng: 121.47, ipPfx: '116.226' },
-  { nick: 'BeijingSniper_X', region: '중국',    city: '베이징',    lat: 39.91,  lng: 116.39, ipPfx: '180.97'  },
-  { nick: 'NYHedgehog99',    region: '미국',    city: '뉴욕',      lat: 40.71,  lng: -74.00, ipPfx: '72.21'   },
-  { nick: 'CaliforniaDrop',  region: '미국',    city: 'LA',        lat: 34.05,  lng: -118.24,ipPfx: '67.180'  },
-  { nick: 'ChicagoFragger',  region: '미국',    city: '시카고',    lat: 41.88,  lng: -87.63, ipPfx: '50.233'  },
-  { nick: 'BerlinBlaster88', region: '독일',    city: '베를린',    lat: 52.52,  lng: 13.40,  ipPfx: '77.186'  },
-  { nick: 'ParisProGamer',   region: '프랑스',  city: '파리',      lat: 48.86,  lng: 2.35,   ipPfx: '90.112'  },
-  { nick: 'LondonClutchPRO', region: '영국',    city: '런던',      lat: 51.51,  lng: -0.13,  ipPfx: '86.148'  },
-  { nick: 'SydneyShot_AU',   region: '호주',    city: '시드니',    lat: -33.87, lng: 151.21, ipPfx: '203.58'  },
-  { nick: 'SingaporeElite1', region: '싱가포르',city: '싱가포르',  lat: 1.35,   lng: 103.82, ipPfx: '103.86'  },
-  { nick: 'MumbaiRaider_IN', region: '인도',    city: '뭄바이',    lat: 19.08,  lng: 72.88,  ipPfx: '49.36'   },
-  { nick: 'RioSniper_BR',    region: '브라질',  city: '상파울루',  lat: -23.55, lng: -46.63, ipPfx: '177.37'  },
-  { nick: 'TorontoFrag_CA',  region: '캐나다',  city: '토론토',    lat: 43.65,  lng: -79.38, ipPfx: '174.5'   },
-  { nick: 'MoscowBear_RU',   region: '러시아',  city: '모스크바',  lat: 55.75,  lng: 37.62,  ipPfx: '95.165'  },
-  { nick: 'DubaiProwler_AE', region: 'UAE',     city: '두바이',    lat: 25.20,  lng: 55.27,  ipPfx: '185.80'  },
-  { nick: 'StockholmSwede',  region: '스웨덴',  city: '스톡홀름',  lat: 59.33,  lng: 18.07,  ipPfx: '91.226'  },
-];
+document.getElementById('ipInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('ipNameInput').focus();
+});
 
-/* ─── 세션 상태 ──────────────────────────────────────────────────────── */
-const session = {
-  players: [],
-  active: false,
-  nextId: 1,
-  poolOrder: [],      // 섞인 순서로 뽑기
-  autoTimer: null,
-};
-
-/* ─── IP 생성 ────────────────────────────────────────────────────────── */
-function genIp(prefix) {
-  const r = () => Math.floor(Math.random() * 253) + 1;
-  return `${prefix}.${r()}.${r()}`;
-}
-
-/* ─── 플레이어 마커 아이콘 (다이아몬드) ──────────────────────────────── */
-function makePlayerIcon(ping, blocked) {
-  const color = blocked ? '#6b7280'
-              : ping < 80  ? '#a78bfa'
-              : ping < 150 ? '#c084fc'
-              :              '#7c3aed';
-  return L.divIcon({
-    className: '',
-    html: `<div style="
-      width:13px;height:13px;
-      background:${color};
-      transform:rotate(45deg);
-      border:2px solid rgba(255,255,255,0.25);
-      box-shadow:0 0 8px ${color}99;
-      cursor:pointer;
-    "></div>`,
-    iconSize: [13, 13],
-    iconAnchor: [6, 6],
-    popupAnchor: [0, -10],
-  });
-}
-
-/* ─── 연결선 ─────────────────────────────────────────────────────────── */
-function makeConnectionLine(player) {
-  const color = player.ping < 80  ? '#a78bfa'
-              : player.ping < 150 ? '#f97316'
-              :                     '#ef4444';
-  return L.polyline([state.homeLatLng, [player.lat, player.lng]], {
-    color,
-    weight: 1.5,
-    opacity: 0.55,
-    dashArray: '7 5',
-    className: 'player-line',
-  }).addTo(map);
-}
-
-/* ─── 플레이어 팝업 ──────────────────────────────────────────────────── */
-function buildPlayerPopup(p) {
-  const pingClass = p.ping < 80 ? 'good' : p.ping < 150 ? 'ok' : 'bad';
-  const pingColor = pingClass === 'good' ? '#22c55e' : pingClass === 'ok' ? '#f97316' : '#ef4444';
-  const dist = Math.round(haversineKm(state.homeLatLng[0], state.homeLatLng[1], p.lat, p.lng));
-  return `
-    <div style="min-width:155px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">
-        <span style="font-weight:700;font-size:12px;color:#c4b5fd;">${p.nick}</span>
-        <span style="font-size:9px;background:rgba(124,58,237,0.2);color:#a78bfa;padding:2px 6px;border-radius:8px;">${p.region}</span>
-      </div>
-      <div style="font-family:monospace;font-size:11px;color:#64748b;margin-bottom:6px;">IP: ${p.ip}</div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:3px;">
-        <span>도시</span><span>${p.city}</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:3px;">
-        <span>거리</span><span>${dist.toLocaleString()}km</span>
-      </div>
-      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:8px;">
-        <span>핑</span><span style="color:${pingColor};font-weight:700;">${p.ping}ms</span>
-      </div>
-      <div style="display:flex;gap:4px;">
-        <button onclick="blockPlayer(${p.id})" style="flex:1;padding:4px;font-size:9px;background:#1a1e29;border:1px solid rgba(239,68,68,0.3);color:#ef4444;border-radius:5px;cursor:pointer;font-weight:700;">
-          ${p.blocked ? '차단 해제' : '차단'}
-        </button>
-        <button onclick="kickPlayer(${p.id})" style="flex:1;padding:4px;font-size:9px;background:#1a1e29;border:1px solid #232737;color:#64748b;border-radius:5px;cursor:pointer;font-weight:700;">
-          제거
-        </button>
-      </div>
-    </div>`;
-}
-
-/* ─── 플레이어 추가 ──────────────────────────────────────────────────── */
-function addPlayer(template) {
-  const ping = estimatePing(template.lat, template.lng);
-  const player = {
-    id: session.nextId++,
-    nick: template.nick,
-    region: template.region,
-    city: template.city,
-    lat: template.lat,
-    lng: template.lng,
-    ip: genIp(template.ipPfx),
-    ping,
-    blocked: false,
-    marker: null,
-    line: null,
-  };
-
-  player.line = makeConnectionLine(player);
-  player.marker = L.marker([player.lat, player.lng], {
-    icon: makePlayerIcon(player.ping, false),
-    zIndexOffset: 800,
-  }).addTo(map);
-  player.marker.on('click', () => {
-    player.marker.bindPopup(buildPlayerPopup(player)).openPopup();
-  });
-
-  session.players.push(player);
-  renderPlayerList();
-  updateSessionCount();
-  return player;
-}
-
-/* ─── 플레이어 제거 ──────────────────────────────────────────────────── */
-function removePlayerById(id) {
-  const idx = session.players.findIndex(p => p.id === id);
-  if (idx === -1) return;
-  const p = session.players[idx];
-  if (p.marker) map.removeLayer(p.marker);
-  if (p.line)   map.removeLayer(p.line);
-  session.players.splice(idx, 1);
-  renderPlayerList();
-  updateSessionCount();
-  map.closePopup();
-}
-
-/* ─── 전역 콜백 ──────────────────────────────────────────────────────── */
-window.blockPlayer = function (id) {
-  const p = session.players.find(p => p.id === id);
-  if (!p) return;
-  p.blocked = !p.blocked;
-  p.marker.setIcon(makePlayerIcon(p.ping, p.blocked));
-  // 연결선 색 업데이트
-  if (p.line) map.removeLayer(p.line);
-  if (!p.blocked) {
-    p.line = makeConnectionLine(p);
-  } else {
-    p.line = L.polyline([state.homeLatLng, [p.lat, p.lng]], {
-      color: '#6b7280', weight: 1, opacity: 0.3, dashArray: '4 6',
-    }).addTo(map);
+document.getElementById('ipNameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') {
+    registerIp(
+      document.getElementById('ipInput').value,
+      document.getElementById('ipNameInput').value
+    );
   }
-  renderPlayerList();
-  map.closePopup();
-};
+});
 
-window.kickPlayer = function (id) {
-  removePlayerById(id);
-};
+document.getElementById('btnAddIp').addEventListener('click', () => {
+  registerIp(
+    document.getElementById('ipInput').value,
+    document.getElementById('ipNameInput').value
+  );
+});
 
-window.focusPlayer = function (id) {
-  const p = session.players.find(p => p.id === id);
-  if (!p) return;
-  map.flyTo([p.lat, p.lng], 6, { duration: 0.8 });
-  setTimeout(() => {
-    p.marker.bindPopup(buildPlayerPopup(p)).openPopup();
-  }, 900);
-};
+// ── 이름 변경 모달 ──
+document.getElementById('btnRenameCancel').addEventListener('click', () => {
+  document.getElementById('renameModal').style.display = 'none';
+  state.renameTarget = null;
+});
 
-/* ─── 플레이어 목록 렌더링 ───────────────────────────────────────────── */
-function renderPlayerList() {
-  const list = document.getElementById('playerList');
-  if (session.players.length === 0) {
-    list.innerHTML = `
-      <div class="empty-state" style="min-height:90px;">
-        <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-          <circle cx="16" cy="10" r="5" stroke="#555" stroke-width="1.5"/>
-          <path d="M4 28c0-6.63 5.37-12 12-12s12 5.37 12 12" stroke="#555" stroke-width="1.5" stroke-linecap="round"/>
-        </svg>
-        <p>${session.active ? '상대방 감지 중...' : '세션 시뮬 버튼으로<br/>대전 상대를 감지하세요'}</p>
-      </div>`;
-    return;
-  }
+document.getElementById('btnRenameConfirm').addEventListener('click', () => {
+  const newName = document.getElementById('renameInput').value.trim();
+  if (!newName) return;
+  const entry = state.savedIPs.find(e => e.id === state.renameTarget);
+  if (entry) { entry.name = newName; renderIpList(); }
+  document.getElementById('renameModal').style.display = 'none';
+  state.renameTarget = null;
+});
 
-  list.innerHTML = session.players.map(p => {
-    const pingClass = p.ping < 80 ? 'good' : p.ping < 150 ? 'ok' : 'bad';
-    const dist = Math.round(haversineKm(state.homeLatLng[0], state.homeLatLng[1], p.lat, p.lng));
-    return `
-      <div class="player-card${p.blocked ? ' blocked-player' : ''}" onclick="focusPlayer(${p.id})">
-        <div class="player-card-top">
-          <span class="player-nick">${p.nick}</span>
-          <span class="player-region-badge">${p.region}</span>
-        </div>
-        <div class="player-ip">⌗ ${p.ip}</div>
-        <div class="player-meta">
-          <span>${p.city} · ${dist.toLocaleString()}km</span>
-          <span class="ping-value ping-${pingClass}">${p.ping}ms</span>
-        </div>
-        <div class="player-actions">
-          <button class="player-action-btn ${p.blocked ? 'unblock-btn' : 'block-btn'}"
-            onclick="event.stopPropagation();blockPlayer(${p.id})">
-            ${p.blocked ? '차단 해제' : '차단'}
-          </button>
-          <button class="player-action-btn kick-btn"
-            onclick="event.stopPropagation();kickPlayer(${p.id})">
-            제거
-          </button>
-        </div>
-      </div>`;
-  }).join('');
-}
+document.getElementById('renameInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') document.getElementById('btnRenameConfirm').click();
+  if (e.key === 'Escape') document.getElementById('btnRenameCancel').click();
+});
 
-/* ─── 세션 카운트 표시 ───────────────────────────────────────────────── */
-function updateSessionCount() {
-  document.getElementById('sessionCount').textContent =
-    `${session.players.length}명 접속`;
-}
-
-/* ─── 세션 시뮬레이션 ────────────────────────────────────────────────── */
-function shufflePool() {
-  session.poolOrder = [...Array(PLAYER_POOL.length).keys()]
-    .sort(() => Math.random() - 0.5);
-}
-
-function startSession() {
-  if (session.active) return;
-  session.active = true;
-  shufflePool();
-
-  document.getElementById('btnStartSession').disabled = true;
-  document.getElementById('btnStopSession').disabled = false;
-
-  // 초기 2~4명 즉시 접속
-  const initialCount = 2 + Math.floor(Math.random() * 3);
-  for (let i = 0; i < initialCount && session.poolOrder.length > 0; i++) {
-    const idx = session.poolOrder.shift();
-    addPlayer(PLAYER_POOL[idx]);
-  }
-
-  // 이후 8~15초마다 입/퇴장
-  session.autoTimer = setInterval(() => {
-    const action = Math.random();
-    if (action < 0.45 && session.poolOrder.length > 0 && session.players.length < 8) {
-      // 새 플레이어 참가
-      const idx = session.poolOrder.shift();
-      addPlayer(PLAYER_POOL[idx]);
-    } else if (action < 0.7 && session.players.length > 1) {
-      // 랜덤 플레이어 퇴장
-      const p = session.players[Math.floor(Math.random() * session.players.length)];
-      removePlayerById(p.id);
-    }
-    // 핑 드리프트
-    session.players.forEach(p => {
-      const drift = Math.floor((Math.random() - 0.5) * 12);
-      p.ping = Math.max(1, Math.min(999, p.ping + drift));
-      p.marker.setIcon(makePlayerIcon(p.ping, p.blocked));
-    });
-    renderPlayerList();
-  }, 9000 + Math.random() * 6000);
-}
-
-function stopSession() {
-  session.active = false;
-  clearInterval(session.autoTimer);
-  session.autoTimer = null;
-  [...session.players].forEach(p => removePlayerById(p.id));
-  session.nextId = 1;
-  shufflePool();
-
-  document.getElementById('btnStartSession').disabled = false;
-  document.getElementById('btnStopSession').disabled = true;
-}
+document.getElementById('renameModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('renameModal'))
+    document.getElementById('btnRenameCancel').click();
+});
 
 /* ─── Init ───────────────────────────────────────────────────────────── */
 function init() {
   updateLocationText();
   updateRadius(state.radiusKm);
-
-  // Add first 6 servers from pool automatically
   for (let i = 0; i < 6; i++) addServerFromPool();
-
-  // Refresh pings every 5 seconds for live feel
-  setInterval(simulatePingUpdate, 5000);
-
-  // 세션 버튼
-  document.getElementById('btnStartSession').addEventListener('click', startSession);
-  document.getElementById('btnStopSession').addEventListener('click', stopSession);
-
-  // 홈 드래그 시 플레이어 연결선 재계산
-  homeMarker.on('drag', () => {
-    const ll = homeMarker.getLatLng();
-    session.players.forEach(p => {
-      if (p.line) {
-        p.line.setLatLngs([ll, [p.lat, p.lng]]);
-      }
-    });
-  });
-
-  updateSessionCount();
+  setInterval(driftPings, 5000);
 }
 
 init();

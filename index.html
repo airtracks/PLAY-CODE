@@ -27,7 +27,7 @@
         </div>
       </div>
       <div class="header-right">
-        <div class="status-badge" id="filterStatusBadge">
+        <div class="status-badge">
           <span class="status-dot" id="statusDot"></span>
           <span id="statusText">활성화</span>
         </div>
@@ -40,15 +40,15 @@
 
     <!-- Main layout -->
     <div class="main-layout">
-      <!-- Left Panel -->
+
+      <!-- ── 왼쪽 패널 ── -->
       <aside class="left-panel">
-        <!-- Location Setup -->
         <section class="panel-section">
           <h2 class="section-title">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M7 0C4.24 0 2 2.24 2 5c0 3.75 5 9 5 9s5-5.25 5-9c0-2.76-2.24-5-5-5zm0 6.5C6.17 6.5 5.5 5.83 5.5 5S6.17 3.5 7 3.5 8.5 4.17 8.5 5 7.83 6.5 7 6.5z"/></svg>
             내 위치
           </h2>
-          <div class="location-display" id="locationDisplay">
+          <div class="location-display">
             <span id="locationText">위치 감지 중...</span>
             <button class="icon-btn" id="refreshLocation" title="위치 새로고침">
               <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M11.49 3.17C10.43 2.1 8.99 1.43 7.39 1.43c-3.19 0-5.79 2.6-5.79 5.79s2.6 5.79 5.79 5.79c2.69 0 4.97-1.85 5.62-4.36h-1.51c-.59 1.77-2.25 3.07-4.11 3.07-2.47 0-4.5-2.03-4.5-4.5s2.03-4.5 4.5-4.5c1.24 0 2.35.52 3.16 1.34L8.14 5.64H12V1.78l-2.51 1.39z"/></svg>
@@ -56,7 +56,6 @@
           </div>
         </section>
 
-        <!-- Radius Control -->
         <section class="panel-section">
           <h2 class="section-title">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="7" cy="7" r="1.5"/></svg>
@@ -75,7 +74,6 @@
           </div>
         </section>
 
-        <!-- Ping Assist -->
         <section class="panel-section">
           <h2 class="section-title">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><path d="M1 10h2V7H1v3zm3 2h2V5H4v7zm3-9v11h2V3H7zm3 4v7h2V7h-2z"/></svg>
@@ -97,7 +95,6 @@
           </div>
         </section>
 
-        <!-- Stats -->
         <section class="panel-section">
           <h2 class="section-title">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor"><rect x="1" y="1" width="12" height="12" rx="1" fill="none" stroke="currentColor" stroke-width="1.2"/><path d="M4 9l2-3 2 2 2-4"/></svg>
@@ -117,21 +114,21 @@
               <span class="stat-value red" id="blockedServers">0</span>
             </div>
             <div class="stat-item">
-              <span class="stat-label">평균 핑</span>
-              <span class="stat-value" id="avgPing">—</span>
+              <span class="stat-label">등록 IP</span>
+              <span class="stat-value" id="savedIpCount">0</span>
             </div>
           </div>
         </section>
       </aside>
 
-      <!-- Map -->
+      <!-- ── 지도 ── -->
       <div class="map-container">
         <div id="map"></div>
         <div class="map-controls">
-          <button class="map-btn" id="btnAddServer" title="테스트 서버 추가">
+          <button class="map-btn" id="btnAddServer" title="게임 서버 추가">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 2v12M2 8h12" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
-          <button class="map-btn" id="btnClearAll" title="모두 지우기">
+          <button class="map-btn" id="btnClearAll" title="서버 모두 지우기">
             <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M3 3l10 10M13 3L3 13" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
           </button>
           <button class="map-btn" id="btnFitBounds" title="맞춤 보기">
@@ -140,65 +137,89 @@
         </div>
       </div>
 
-      <!-- Right Panel -->
+      <!-- ── 오른쪽 패널 ── -->
       <aside class="right-panel">
 
-        <!-- ── 게임 세션 (상대방 IP/위치) ── -->
-        <div class="session-header">
-          <div class="session-title-row">
+        <!-- ① 상대방 IP 입력 -->
+        <div class="ip-form-section">
+          <h2 class="section-title">
             <svg width="13" height="13" viewBox="0 0 14 14" fill="currentColor" style="color:#a78bfa">
-              <circle cx="7" cy="4" r="2.5"/><path d="M1 13c0-3.31 2.69-6 6-6s6 2.69 6 6"/>
+              <circle cx="7" cy="4" r="2.5"/>
+              <path d="M1 13c0-3.31 2.69-6 6-6s6 2.69 6 6"/>
             </svg>
-            <span class="session-title">게임 세션</span>
-            <span class="session-count" id="sessionCount">0명 접속</span>
+            상대방 IP 등록
+          </h2>
+
+          <div class="ip-form-fields">
+            <input
+              type="text" id="ipInput"
+              class="ip-text-input"
+              placeholder="IP 주소  예) 103.86.12.45"
+              maxlength="45"
+              autocomplete="off" spellcheck="false"
+            />
+            <input
+              type="text" id="ipNameInput"
+              class="ip-text-input"
+              placeholder="이름 / 닉네임 (선택)"
+              maxlength="30"
+            />
+            <button class="add-ip-btn" id="btnAddIp">
+              <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><path d="M6 1v10M1 6h10" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+              추가
+            </button>
           </div>
-          <div class="session-btn-row">
-            <button class="session-btn start" id="btnStartSession">세션 시뮬</button>
-            <button class="session-btn stop" id="btnStopSession" disabled>종료</button>
-          </div>
+          <div class="ip-form-msg" id="ipFormMsg"></div>
         </div>
 
-        <div class="player-list" id="playerList">
-          <div class="empty-state" style="min-height:90px;">
+        <!-- ② 저장된 IP 목록 -->
+        <div class="ip-list-header">
+          <span>저장된 IP</span>
+          <span class="ip-list-count" id="ipListCount">0개</span>
+        </div>
+        <div class="ip-list" id="ipList">
+          <div class="empty-state ip-empty">
             <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-              <circle cx="16" cy="10" r="5" stroke="#555" stroke-width="1.5"/>
-              <path d="M4 28c0-6.63 5.37-12 12-12s12 5.37 12 12" stroke="#555" stroke-width="1.5" stroke-linecap="round"/>
+              <rect x="4" y="8" width="24" height="16" rx="3" stroke="#444" stroke-width="1.5"/>
+              <path d="M10 14h12M10 18h8" stroke="#444" stroke-width="1.5" stroke-linecap="round"/>
             </svg>
-            <p>세션 시뮬 버튼으로<br/>대전 상대를 감지하세요</p>
+            <p>IP를 입력하여<br/>상대방을 등록하세요</p>
           </div>
         </div>
 
-        <!-- ── 서버 목록 ── -->
+        <!-- ③ 게임 서버 탭 -->
         <div class="tabs">
           <button class="tab active" data-tab="all">전체</button>
           <button class="tab" data-tab="allowed">허용</button>
           <button class="tab" data-tab="blocked">차단</button>
-          <button class="tab" data-tab="whitelist">화이트리스트</button>
         </div>
-
         <div class="server-list" id="serverList">
           <div class="empty-state">
-            <svg width="40" height="40" viewBox="0 0 40 40" fill="none"><circle cx="20" cy="20" r="18" stroke="#444" stroke-width="2"/><path d="M13 20h14M20 13v14" stroke="#444" stroke-width="2" stroke-linecap="round"/></svg>
-            <p>서버를 추가하려면<br/>+ 버튼을 클릭하세요</p>
+            <svg width="36" height="36" viewBox="0 0 36 36" fill="none"><circle cx="18" cy="18" r="16" stroke="#444" stroke-width="1.5"/><path d="M11 18h14M18 11v14" stroke="#444" stroke-width="1.5" stroke-linecap="round"/></svg>
+            <p>+ 버튼으로 서버 추가</p>
           </div>
         </div>
 
-        <!-- Legend -->
+        <!-- 범례 -->
         <div class="legend">
-          <div class="legend-item">
-            <span class="legend-dot home"></span>내 위치
-          </div>
-          <div class="legend-item">
-            <span class="legend-dot player"></span>상대방
-          </div>
-          <div class="legend-item">
-            <span class="legend-dot allowed"></span>허용 서버
-          </div>
-          <div class="legend-item">
-            <span class="legend-dot blocked"></span>차단 서버
-          </div>
+          <div class="legend-item"><span class="legend-dot home"></span>내 위치</div>
+          <div class="legend-item"><span class="legend-dot player"></span>상대방 IP</div>
+          <div class="legend-item"><span class="legend-dot allowed"></span>허용 서버</div>
+          <div class="legend-item"><span class="legend-dot blocked-dot"></span>차단 서버</div>
         </div>
       </aside>
+    </div>
+  </div>
+
+  <!-- 이름 수정 모달 -->
+  <div class="modal-overlay" id="renameModal" style="display:none">
+    <div class="modal">
+      <h3 class="modal-title">이름 변경</h3>
+      <input type="text" id="renameInput" class="ip-text-input" placeholder="새 이름 입력" maxlength="30" />
+      <div class="modal-actions">
+        <button class="modal-btn cancel" id="btnRenameCancel">취소</button>
+        <button class="modal-btn confirm" id="btnRenameConfirm">저장</button>
+      </div>
     </div>
   </div>
 
