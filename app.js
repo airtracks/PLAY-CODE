@@ -25,10 +25,24 @@ const map = L.map('map', {
   attributionControl: true,
 });
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '© OpenStreetMap contributors',
-  maxZoom: 18,
-}).addTo(map);
+// CartoDB Dark Matter — 외부 API 키 불필요, 403 차단 없음
+const tileLayer = L.tileLayer(
+  'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png',
+  {
+    attribution: '© CartoDB © OpenStreetMap contributors',
+    subdomains: 'abcd',
+    maxZoom: 19,
+  }
+).addTo(map);
+
+// 타일 로드 실패 시 레이블 없는 심플 다크로 폴백
+tileLayer.on('tileerror', () => {
+  map.removeLayer(tileLayer);
+  L.tileLayer(
+    'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    { attribution: '© CartoDB', subdomains: 'abcd', maxZoom: 19 }
+  ).addTo(map);
+});
 
 /* ─── Custom markers ─────────────────────────────────────────────────── */
 function makeHomeIcon() {
