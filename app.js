@@ -495,6 +495,298 @@ map.on('dblclick', (e) => {
   addServer({ name, lat, lng, ping });
 });
 
+/* ════════════════════════════════════════════════════════════════════════
+   게임 세션 — 상대방 IP / 위치
+   ════════════════════════════════════════════════════════════════════════ */
+
+/* ─── 플레이어 풀 (지역별 닉네임 + IP 대역 + 좌표) ─────────────────────── */
+const PLAYER_POOL = [
+  { nick: 'xXSn1perKingXx',  region: '한국',    city: '서울',      lat: 37.56,  lng: 126.97, ipPfx: '175.223' },
+  { nick: 'BattleKR_Daejin', region: '한국',    city: '부산',      lat: 35.18,  lng: 129.07, ipPfx: '110.70'  },
+  { nick: 'NinjaJP_Reika',   region: '일본',    city: '도쿄',      lat: 35.68,  lng: 139.69, ipPfx: '60.100'  },
+  { nick: 'OsakaGamer07',    region: '일본',    city: '오사카',    lat: 34.69,  lng: 135.50, ipPfx: '49.212'  },
+  { nick: 'ShanghaiPro99',   region: '중국',    city: '상하이',    lat: 31.23,  lng: 121.47, ipPfx: '116.226' },
+  { nick: 'BeijingSniper_X', region: '중국',    city: '베이징',    lat: 39.91,  lng: 116.39, ipPfx: '180.97'  },
+  { nick: 'NYHedgehog99',    region: '미국',    city: '뉴욕',      lat: 40.71,  lng: -74.00, ipPfx: '72.21'   },
+  { nick: 'CaliforniaDrop',  region: '미국',    city: 'LA',        lat: 34.05,  lng: -118.24,ipPfx: '67.180'  },
+  { nick: 'ChicagoFragger',  region: '미국',    city: '시카고',    lat: 41.88,  lng: -87.63, ipPfx: '50.233'  },
+  { nick: 'BerlinBlaster88', region: '독일',    city: '베를린',    lat: 52.52,  lng: 13.40,  ipPfx: '77.186'  },
+  { nick: 'ParisProGamer',   region: '프랑스',  city: '파리',      lat: 48.86,  lng: 2.35,   ipPfx: '90.112'  },
+  { nick: 'LondonClutchPRO', region: '영국',    city: '런던',      lat: 51.51,  lng: -0.13,  ipPfx: '86.148'  },
+  { nick: 'SydneyShot_AU',   region: '호주',    city: '시드니',    lat: -33.87, lng: 151.21, ipPfx: '203.58'  },
+  { nick: 'SingaporeElite1', region: '싱가포르',city: '싱가포르',  lat: 1.35,   lng: 103.82, ipPfx: '103.86'  },
+  { nick: 'MumbaiRaider_IN', region: '인도',    city: '뭄바이',    lat: 19.08,  lng: 72.88,  ipPfx: '49.36'   },
+  { nick: 'RioSniper_BR',    region: '브라질',  city: '상파울루',  lat: -23.55, lng: -46.63, ipPfx: '177.37'  },
+  { nick: 'TorontoFrag_CA',  region: '캐나다',  city: '토론토',    lat: 43.65,  lng: -79.38, ipPfx: '174.5'   },
+  { nick: 'MoscowBear_RU',   region: '러시아',  city: '모스크바',  lat: 55.75,  lng: 37.62,  ipPfx: '95.165'  },
+  { nick: 'DubaiProwler_AE', region: 'UAE',     city: '두바이',    lat: 25.20,  lng: 55.27,  ipPfx: '185.80'  },
+  { nick: 'StockholmSwede',  region: '스웨덴',  city: '스톡홀름',  lat: 59.33,  lng: 18.07,  ipPfx: '91.226'  },
+];
+
+/* ─── 세션 상태 ──────────────────────────────────────────────────────── */
+const session = {
+  players: [],
+  active: false,
+  nextId: 1,
+  poolOrder: [],      // 섞인 순서로 뽑기
+  autoTimer: null,
+};
+
+/* ─── IP 생성 ────────────────────────────────────────────────────────── */
+function genIp(prefix) {
+  const r = () => Math.floor(Math.random() * 253) + 1;
+  return `${prefix}.${r()}.${r()}`;
+}
+
+/* ─── 플레이어 마커 아이콘 (다이아몬드) ──────────────────────────────── */
+function makePlayerIcon(ping, blocked) {
+  const color = blocked ? '#6b7280'
+              : ping < 80  ? '#a78bfa'
+              : ping < 150 ? '#c084fc'
+              :              '#7c3aed';
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:13px;height:13px;
+      background:${color};
+      transform:rotate(45deg);
+      border:2px solid rgba(255,255,255,0.25);
+      box-shadow:0 0 8px ${color}99;
+      cursor:pointer;
+    "></div>`,
+    iconSize: [13, 13],
+    iconAnchor: [6, 6],
+    popupAnchor: [0, -10],
+  });
+}
+
+/* ─── 연결선 ─────────────────────────────────────────────────────────── */
+function makeConnectionLine(player) {
+  const color = player.ping < 80  ? '#a78bfa'
+              : player.ping < 150 ? '#f97316'
+              :                     '#ef4444';
+  return L.polyline([state.homeLatLng, [player.lat, player.lng]], {
+    color,
+    weight: 1.5,
+    opacity: 0.55,
+    dashArray: '7 5',
+    className: 'player-line',
+  }).addTo(map);
+}
+
+/* ─── 플레이어 팝업 ──────────────────────────────────────────────────── */
+function buildPlayerPopup(p) {
+  const pingClass = p.ping < 80 ? 'good' : p.ping < 150 ? 'ok' : 'bad';
+  const pingColor = pingClass === 'good' ? '#22c55e' : pingClass === 'ok' ? '#f97316' : '#ef4444';
+  const dist = Math.round(haversineKm(state.homeLatLng[0], state.homeLatLng[1], p.lat, p.lng));
+  return `
+    <div style="min-width:155px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px;">
+        <span style="font-weight:700;font-size:12px;color:#c4b5fd;">${p.nick}</span>
+        <span style="font-size:9px;background:rgba(124,58,237,0.2);color:#a78bfa;padding:2px 6px;border-radius:8px;">${p.region}</span>
+      </div>
+      <div style="font-family:monospace;font-size:11px;color:#64748b;margin-bottom:6px;">IP: ${p.ip}</div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:3px;">
+        <span>도시</span><span>${p.city}</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:3px;">
+        <span>거리</span><span>${dist.toLocaleString()}km</span>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:11px;color:#64748b;margin-bottom:8px;">
+        <span>핑</span><span style="color:${pingColor};font-weight:700;">${p.ping}ms</span>
+      </div>
+      <div style="display:flex;gap:4px;">
+        <button onclick="blockPlayer(${p.id})" style="flex:1;padding:4px;font-size:9px;background:#1a1e29;border:1px solid rgba(239,68,68,0.3);color:#ef4444;border-radius:5px;cursor:pointer;font-weight:700;">
+          ${p.blocked ? '차단 해제' : '차단'}
+        </button>
+        <button onclick="kickPlayer(${p.id})" style="flex:1;padding:4px;font-size:9px;background:#1a1e29;border:1px solid #232737;color:#64748b;border-radius:5px;cursor:pointer;font-weight:700;">
+          제거
+        </button>
+      </div>
+    </div>`;
+}
+
+/* ─── 플레이어 추가 ──────────────────────────────────────────────────── */
+function addPlayer(template) {
+  const ping = estimatePing(template.lat, template.lng);
+  const player = {
+    id: session.nextId++,
+    nick: template.nick,
+    region: template.region,
+    city: template.city,
+    lat: template.lat,
+    lng: template.lng,
+    ip: genIp(template.ipPfx),
+    ping,
+    blocked: false,
+    marker: null,
+    line: null,
+  };
+
+  player.line = makeConnectionLine(player);
+  player.marker = L.marker([player.lat, player.lng], {
+    icon: makePlayerIcon(player.ping, false),
+    zIndexOffset: 800,
+  }).addTo(map);
+  player.marker.on('click', () => {
+    player.marker.bindPopup(buildPlayerPopup(player)).openPopup();
+  });
+
+  session.players.push(player);
+  renderPlayerList();
+  updateSessionCount();
+  return player;
+}
+
+/* ─── 플레이어 제거 ──────────────────────────────────────────────────── */
+function removePlayerById(id) {
+  const idx = session.players.findIndex(p => p.id === id);
+  if (idx === -1) return;
+  const p = session.players[idx];
+  if (p.marker) map.removeLayer(p.marker);
+  if (p.line)   map.removeLayer(p.line);
+  session.players.splice(idx, 1);
+  renderPlayerList();
+  updateSessionCount();
+  map.closePopup();
+}
+
+/* ─── 전역 콜백 ──────────────────────────────────────────────────────── */
+window.blockPlayer = function (id) {
+  const p = session.players.find(p => p.id === id);
+  if (!p) return;
+  p.blocked = !p.blocked;
+  p.marker.setIcon(makePlayerIcon(p.ping, p.blocked));
+  // 연결선 색 업데이트
+  if (p.line) map.removeLayer(p.line);
+  if (!p.blocked) {
+    p.line = makeConnectionLine(p);
+  } else {
+    p.line = L.polyline([state.homeLatLng, [p.lat, p.lng]], {
+      color: '#6b7280', weight: 1, opacity: 0.3, dashArray: '4 6',
+    }).addTo(map);
+  }
+  renderPlayerList();
+  map.closePopup();
+};
+
+window.kickPlayer = function (id) {
+  removePlayerById(id);
+};
+
+window.focusPlayer = function (id) {
+  const p = session.players.find(p => p.id === id);
+  if (!p) return;
+  map.flyTo([p.lat, p.lng], 6, { duration: 0.8 });
+  setTimeout(() => {
+    p.marker.bindPopup(buildPlayerPopup(p)).openPopup();
+  }, 900);
+};
+
+/* ─── 플레이어 목록 렌더링 ───────────────────────────────────────────── */
+function renderPlayerList() {
+  const list = document.getElementById('playerList');
+  if (session.players.length === 0) {
+    list.innerHTML = `
+      <div class="empty-state" style="min-height:90px;">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <circle cx="16" cy="10" r="5" stroke="#555" stroke-width="1.5"/>
+          <path d="M4 28c0-6.63 5.37-12 12-12s12 5.37 12 12" stroke="#555" stroke-width="1.5" stroke-linecap="round"/>
+        </svg>
+        <p>${session.active ? '상대방 감지 중...' : '세션 시뮬 버튼으로<br/>대전 상대를 감지하세요'}</p>
+      </div>`;
+    return;
+  }
+
+  list.innerHTML = session.players.map(p => {
+    const pingClass = p.ping < 80 ? 'good' : p.ping < 150 ? 'ok' : 'bad';
+    const dist = Math.round(haversineKm(state.homeLatLng[0], state.homeLatLng[1], p.lat, p.lng));
+    return `
+      <div class="player-card${p.blocked ? ' blocked-player' : ''}" onclick="focusPlayer(${p.id})">
+        <div class="player-card-top">
+          <span class="player-nick">${p.nick}</span>
+          <span class="player-region-badge">${p.region}</span>
+        </div>
+        <div class="player-ip">⌗ ${p.ip}</div>
+        <div class="player-meta">
+          <span>${p.city} · ${dist.toLocaleString()}km</span>
+          <span class="ping-value ping-${pingClass}">${p.ping}ms</span>
+        </div>
+        <div class="player-actions">
+          <button class="player-action-btn ${p.blocked ? 'unblock-btn' : 'block-btn'}"
+            onclick="event.stopPropagation();blockPlayer(${p.id})">
+            ${p.blocked ? '차단 해제' : '차단'}
+          </button>
+          <button class="player-action-btn kick-btn"
+            onclick="event.stopPropagation();kickPlayer(${p.id})">
+            제거
+          </button>
+        </div>
+      </div>`;
+  }).join('');
+}
+
+/* ─── 세션 카운트 표시 ───────────────────────────────────────────────── */
+function updateSessionCount() {
+  document.getElementById('sessionCount').textContent =
+    `${session.players.length}명 접속`;
+}
+
+/* ─── 세션 시뮬레이션 ────────────────────────────────────────────────── */
+function shufflePool() {
+  session.poolOrder = [...Array(PLAYER_POOL.length).keys()]
+    .sort(() => Math.random() - 0.5);
+}
+
+function startSession() {
+  if (session.active) return;
+  session.active = true;
+  shufflePool();
+
+  document.getElementById('btnStartSession').disabled = true;
+  document.getElementById('btnStopSession').disabled = false;
+
+  // 초기 2~4명 즉시 접속
+  const initialCount = 2 + Math.floor(Math.random() * 3);
+  for (let i = 0; i < initialCount && session.poolOrder.length > 0; i++) {
+    const idx = session.poolOrder.shift();
+    addPlayer(PLAYER_POOL[idx]);
+  }
+
+  // 이후 8~15초마다 입/퇴장
+  session.autoTimer = setInterval(() => {
+    const action = Math.random();
+    if (action < 0.45 && session.poolOrder.length > 0 && session.players.length < 8) {
+      // 새 플레이어 참가
+      const idx = session.poolOrder.shift();
+      addPlayer(PLAYER_POOL[idx]);
+    } else if (action < 0.7 && session.players.length > 1) {
+      // 랜덤 플레이어 퇴장
+      const p = session.players[Math.floor(Math.random() * session.players.length)];
+      removePlayerById(p.id);
+    }
+    // 핑 드리프트
+    session.players.forEach(p => {
+      const drift = Math.floor((Math.random() - 0.5) * 12);
+      p.ping = Math.max(1, Math.min(999, p.ping + drift));
+      p.marker.setIcon(makePlayerIcon(p.ping, p.blocked));
+    });
+    renderPlayerList();
+  }, 9000 + Math.random() * 6000);
+}
+
+function stopSession() {
+  session.active = false;
+  clearInterval(session.autoTimer);
+  session.autoTimer = null;
+  [...session.players].forEach(p => removePlayerById(p.id));
+  session.nextId = 1;
+  shufflePool();
+
+  document.getElementById('btnStartSession').disabled = false;
+  document.getElementById('btnStopSession').disabled = true;
+}
+
 /* ─── Init ───────────────────────────────────────────────────────────── */
 function init() {
   updateLocationText();
@@ -505,6 +797,22 @@ function init() {
 
   // Refresh pings every 5 seconds for live feel
   setInterval(simulatePingUpdate, 5000);
+
+  // 세션 버튼
+  document.getElementById('btnStartSession').addEventListener('click', startSession);
+  document.getElementById('btnStopSession').addEventListener('click', stopSession);
+
+  // 홈 드래그 시 플레이어 연결선 재계산
+  homeMarker.on('drag', () => {
+    const ll = homeMarker.getLatLng();
+    session.players.forEach(p => {
+      if (p.line) {
+        p.line.setLatLngs([ll, [p.lat, p.lng]]);
+      }
+    });
+  });
+
+  updateSessionCount();
 }
 
 init();
