@@ -1,19 +1,28 @@
 // ==UserScript==
 // @name         퍼블로그 챗봇 품질 분석기
 // @namespace    https://chatbot.publog.co.kr/
-// @version      1.1
+// @version      1.2
 // @description  챗봇 어드민에 분석 버튼을 자동 추가. 클릭 한 번으로 빈응답·회피·환각·메뉴버그 리포트 생성.
-// @match        https://chatbot.publog.co.kr/admin/*
+// @match        *://chatbot.publog.co.kr/admin*
+// @match        *://chatbot.publog.co.kr/*
 // @grant        none
-// @run-at       document-idle
+// @run-at       document-end
 // ==/UserScript==
 
 (function() {
   'use strict';
 
-  // 이미 버튼이 있으면 중복 방지
-  if (document.getElementById('publog-analyzer-btn')) return;
+  // admin 페이지에서만 동작
+  if (!location.pathname.startsWith('/admin')) return;
 
+  // body가 준비될 때까지 대기 후 버튼 주입
+  function injectButton() {
+    if (!document.body) { setTimeout(injectButton, 100); return; }
+    if (document.getElementById('publog-analyzer-btn')) return;
+    createButton();
+  }
+
+  function createButton() {
   // 플로팅 버튼 생성
   const btn = document.createElement('button');
   btn.id = 'publog-analyzer-btn';
@@ -166,4 +175,8 @@
       console.error(e);
     }
   };
+  }
+
+  injectButton();
+  console.log('[퍼블로그 챗봇 분석기] v1.2 로드됨 - 우측 하단 버튼 확인');
 })();
