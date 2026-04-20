@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         퍼블로그 챗봇 품질 분석기
 // @namespace    https://chatbot.publog.co.kr/
-// @version      1.0
+// @version      1.1
 // @description  챗봇 어드민에 분석 버튼을 자동 추가. 클릭 한 번으로 빈응답·회피·환각·메뉴버그 리포트 생성.
 // @match        https://chatbot.publog.co.kr/admin/*
 // @grant        none
@@ -28,9 +28,16 @@
     const D = Math.min(Math.max(days, 1), 30);
     const cutoffStr = prompt('이 시각 이후만 (UTC ISO, 비우면 전체)\n예: 2026-04-17T09:00 = KST 4/17 18:00', '') || '';
 
-    const w = window.open('', '_blank');
-    w.document.write('<title>분석중...</title><body style="font-family:sans-serif;padding:40px"><h2>📡 데이터 수집 중...</h2><pre id="log" style="background:#f3f4f6;padding:16px;border-radius:8px"></pre></body>');
-    const log = m => { w.document.getElementById('log').textContent += m + '\n'; };
+    // 진행상태 오버레이 (페이지 내 표시 - 팝업 차단 우회)
+    let overlay = document.getElementById('publog-analyzer-overlay');
+    if (overlay) overlay.remove();
+    overlay = document.createElement('div');
+    overlay.id = 'publog-analyzer-overlay';
+    overlay.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:99999;background:white;padding:24px 32px;border-radius:12px;box-shadow:0 8px 32px rgba(0,0,0,0.2);font-family:"Malgun Gothic",sans-serif;min-width:400px;max-width:600px;max-height:60vh;overflow-y:auto';
+    overlay.innerHTML = '<h2 style="margin:0 0 12px;color:#2563eb">📡 분석중...</h2><pre id="publog-analyzer-log" style="background:#f3f4f6;padding:12px;border-radius:6px;margin:0;font-size:12px;max-height:300px;overflow-y:auto"></pre><button id="publog-analyzer-close" style="margin-top:12px;padding:8px 16px;background:#dc2626;color:white;border:none;border-radius:6px;cursor:pointer">취소</button>';
+    document.body.appendChild(overlay);
+    document.getElementById('publog-analyzer-close').onclick = () => overlay.remove();
+    const log = m => { const el = document.getElementById('publog-analyzer-log'); if (el) { el.textContent += m + '\n'; el.scrollTop = el.scrollHeight; } };
 
     try {
       log('세션 목록 가져오는 중...');
@@ -146,11 +153,17 @@
 <section><h2>🟡 회피 답변 전체 (${evasive.length})</h2>${renderList(evasive, p => `<div class="qa warn"><div class="q">Q: ${esc(truncate(p.q,200))}</div><div class="a">A: ${esc(truncate(p.a,300))}</div></div>`, 50)}</section>
 <p style="color:#888;font-size:12px;text-align:center;margin-top:40px">생성 시각: ${new Date().toLocaleString('ko-KR')}</p>
 </body></html>`;
-      w.document.open();
-      w.document.write(html);
-      w.document.close();
+      // Blob URL로 새 탭 열기 (팝업 차단 우회)
+      const blob = new Blob([html], {type: 'text/html;charset=utf-8'});
+      const url = URL.createObjectURL(blob);
+      overlay.innerHTML = `<h2 style="margin:0 0 12px;color:#059669">✅ 분석 완료!</h2>
+        <p>세션 ${stats.sessions}건 / Q&amp;A ${stats.meaningfulQA}건 분석함</p>
+        <p style="font-size:13px;color:#666">빈응답 ${stats.empty}건 · 회피 ${stats.evasive}건 · 환각 ${stats.hallucination}건 · 메뉴버그 ${stats.menuBugs}건 · 정상 ${stats.ok}건</p>
+        <a href="${url}" target="_blank" style="display:inline-block;padding:12px 24px;background:#2563eb;color:white;text-decoration:none;border-radius:6px;font-weight:bold;margin-top:8px">📊 리포트 새 탭에서 보기</a>
+        <button onclick="document.getElementById('publog-analyzer-overlay').remove()" style="margin-left:8px;padding:12px 16px;background:#6b7280;color:white;border:none;border-radius:6px;cursor:pointer">닫기</button>`;
     } catch (e) {
       log('❌ 오류: ' + e.message);
+      console.error(e);
     }
   };
 })();
