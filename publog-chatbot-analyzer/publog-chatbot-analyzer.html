@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>퍼블로그 챗봇 품질 분석기</title>
+<style>
+  body { font-family: 'Malgun Gothic', sans-serif; max-width: 900px; margin: 40px auto; padding: 24px; background: #f5f7fa; color: #222; }
+  h1 { color: #2563eb; }
+  .bookmarklet { display: inline-block; padding: 12px 20px; background: #2563eb; color: white !important; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px; margin: 12px 0; cursor: grab; }
+  .bookmarklet:hover { background: #1d4ed8; }
+  .step { background: white; padding: 16px 20px; margin: 12px 0; border-radius: 8px; border-left: 4px solid #2563eb; }
+  code { background: #e5e7eb; padding: 2px 6px; border-radius: 4px; font-size: 13px; }
+  pre { background: #1e293b; color: #e2e8f0; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 12px; max-height: 220px; }
+  .warn { background: #fef3c7; border-left-color: #d97706; }
+  .ok { background: #d1fae5; border-left-color: #059669; }
+</style>
+</head>
+<body>
+<h1>📊 퍼블로그 챗봇 품질 분석기</h1>
+<p>챗봇 어드민의 채팅 히스토리를 자동으로 분석해서 빈 응답·회피 답변·환각·메뉴 라우팅 버그·KB 갭을 한 화면에 보여주는 도구.</p>
+
+<div class="step ok">
+  <h3>① 설치 — 두 가지 방법 중 택1</h3>
+
+  <p><b>⚠️ 아래 파란 버튼을 그냥 클릭하면 동작 안 함!</b> (Chrome 보안 정책)<br>
+  반드시 <b>드래그</b>해서 즐겨찾기에 등록하거나 <b>방법 B</b>를 사용하세요.</p>
+
+  <h4>방법 A — 즐겨찾기 등록 (1회만, 권장)</h4>
+  <ol>
+    <li><code>Ctrl+Shift+B</code>로 즐겨찾기 막대 표시</li>
+    <li>아래 파란 버튼을 <b>마우스로 잡고 끌어서</b> 즐겨찾기 막대로 드롭</li>
+    <li>이후 <a href="https://chatbot.publog.co.kr/admin/" target="_blank">챗봇 어드민</a>에서 그 즐겨찾기 클릭 = 분석 실행</li>
+  </ol>
+  <a class="bookmarklet" id="bm" href="#" onclick="alert('⚠️ 이 버튼은 클릭이 아니라 드래그해서 즐겨찾기에 등록해야 합니다.\\n\\n또는 방법 B (코드 복사)를 사용하세요.'); return false;">📊 챗봇 분석 실행 (드래그용)</a>
+
+  <h4>방법 B — 콘솔에 코드 붙여넣기 (즉시 실행, 매번 반복)</h4>
+  <ol>
+    <li>아래 <b>"📋 코드 복사"</b> 클릭</li>
+    <li><a href="https://chatbot.publog.co.kr/admin/" target="_blank">챗봇 어드민</a> 접속</li>
+    <li><code>F12</code> → <b>Console</b> 탭 → 붙여넣기 → Enter</li>
+  </ol>
+  <button id="copybtn" style="padding:10px 18px;background:#059669;color:white;border:none;border-radius:8px;font-size:15px;cursor:pointer;font-weight:bold">📋 코드 복사</button>
+  <span id="copymsg" style="margin-left:12px;color:#059669;font-weight:bold"></span>
+</div>
+
+<div class="step">
+  <h3>② 사용</h3>
+  <ol>
+    <li><a href="https://chatbot.publog.co.kr/admin/" target="_blank">https://chatbot.publog.co.kr/admin/</a> 접속 (로그인 상태)</li>
+    <li>북마크에서 <b>"📊 챗봇 분석 실행"</b> 클릭</li>
+    <li>새 창에 분석 리포트가 생성됨 (전체 30일 또는 날짜 선택 가능)</li>
+  </ol>
+</div>
+
+<div class="step warn">
+  <h3>③ 리포트 내용</h3>
+  <ul>
+    <li>📈 핵심 지표: 세션수 / Q&amp;A / 빈응답률 / 회피율 / 정상답변률</li>
+    <li>🔴 빈 응답 목록 (질문은 들어왔는데 챗봇이 답 못한 케이스)</li>
+    <li>🟠 회피 답변 ("사이트에서 확인하세요" / "상담사 연결" 패턴)</li>
+    <li>🟡 잘못된 답변 후보 (정책 충돌·날짜 오류 키워드)</li>
+    <li>🔄 메뉴 라우팅 버그 (메뉴 클릭 → 빈/엉뚱 답변)</li>
+    <li>🔁 같은 질문 반복 (사용자 답답함 신호)</li>
+    <li>📚 KB 갭 후보 ("안내 문서에 없습니다", "명시되어 있지 않" 등)</li>
+    <li>📥 JSON 다운로드 (Notion 보고용)</li>
+  </ul>
+</div>
+
+<div class="step">
+  <h3>④ 북마클릿 소스 (참고)</h3>
+  <pre id="src"></pre>
+</div>
+
+<script>
+// ==== 북마클릿 본체 ====
+const RUNNER = async function(){
+  if (!location.host.includes('chatbot.publog.co.kr')) {
+    alert('이 도구는 https://chatbot.publog.co.kr/admin/ 에서 실행해야 합니다.');
+    return;
+  }
+  const days = parseInt(prompt('분석할 일수 (기본 7일, 최대 30):', '7') || '7', 10);
+  const D = Math.min(Math.max(days, 1), 30);
+  const cutoffStr = prompt('이 시각 이후만 분석 (UTC ISO, 비우면 전체)\n예: 2026-04-17T09:00 = KST 4/17 18:00', '') || '';
+
+  const w = window.open('', '_blank');
+  w.document.write('<title>분석중...</title><body style="font-family:sans-serif;padding:40px"><h2>📡 데이터 수집 중...</h2><pre id="log"></pre></body>');
+  const log = m => { w.document.getElementById('log').textContent += m + '\n'; };
+
+  try {
+    log('세션 목록 가져오는 중...');
+    const sessions = [];
+    for (let p=1; p<=10; p++) {
+      const r = await fetch(`/api/admin/chat-history?days=${D}&limit=100&page=${p}`, {credentials:'include'});
+      const j = await r.json();
+      const arr = j.data || [];
+      sessions.push(...arr);
+      if (arr.length < 100) break;
+    }
+    const filtered = cutoffStr ? sessions.filter(s => s.started_at >= cutoffStr) : sessions;
+    log(`전체 ${sessions.length}건 → 필터 후 ${filtered.length}건`);
+
+    log('각 세션 메시지 가져오는 중...');
+    const details = [];
+    let i = 0;
+    async function worker(){
+      while (i < filtered.length) {
+        const idx = i++;
+        const s = filtered[idx];
+        try {
+          const r = await fetch('/api/admin/chat-history/' + encodeURIComponent(s.session_id), {credentials:'include'});
+          const j = await r.json();
+          details.push({meta: s, msgs: j.data?.data || j.data || []});
+        } catch(e) {
+          details.push({meta: s, msgs: [], error: e.message});
+        }
+        if (idx % 10 === 0) log(`  ${idx+1}/${filtered.length}`);
+      }
+    }
+    await Promise.all(Array.from({length: 8}, worker));
+    log('분석 중...');
+
+    // ==== 분석 ====
+    const isMenuQ = q => /^[1-6]번?$/.test(q.trim()) || /^[a-z]$/i.test(q.trim());
+    const evasiveRx = /상담사|상담원|고객센터|1544|1:1 문의|확인이 어려|확인이 필요|정확한 안내|정확한 내용은 사이트|드릴 수 없|확실하지|판단이 어려|문의 부탁|안내 문서에 없|명시되어 있지 않|명시되지 않/;
+    const hallucinationRx = /\d시간 이내에 자동|10분 이내|1시간 이내.*취소|평일에만 제작|토요일.*제작|토요일.*포함/;
+    const menuLabelRx = /^(배송 조회|취소\/환불|쿠폰 사용|결제 오류|대량 주문|제품 불량|상담원 연결|상담원연결|주문\/배송 문의|반품\/교환|제작\/파일 문의|가격\/할인\/쿠폰)$/;
+    const dateErrorRx = /이미 지난 출고예정일|4월 \d+일\(.\)에서 4월 \1일/;
+
+    const sessions_qa = details.map(d => {
+      const msgs = d.msgs || [];
+      const pairs = [];
+      for (let i=0; i<msgs.length; i++) {
+        if (msgs[i].role === 'user') {
+          let ans = '';
+          for (let j=i+1; j<msgs.length; j++) {
+            if (msgs[j].role === 'assistant') { ans = msgs[j].content; break; }
+            if (msgs[j].role === 'user') break;
+          }
+          pairs.push({q: msgs[i].content, a: ans, cat: msgs[i].question_category});
+        }
+      }
+      return {at: d.meta.started_at, sid: d.meta.session_id, cat: d.meta.question_category, pairs};
+    });
+
+    const allMeaningful = sessions_qa.flatMap(s => s.pairs.filter(p => p.q && p.q.length > 3 && !isMenuQ(p.q)));
+    const empty = allMeaningful.filter(p => !p.a);
+    const evasive = allMeaningful.filter(p => p.a && evasiveRx.test(p.a));
+    const hallucination = allMeaningful.filter(p => p.a && hallucinationRx.test(p.a));
+    const dateErr = allMeaningful.filter(p => p.a && dateErrorRx.test(p.a));
+    const menuBugs = sessions_qa.flatMap(s => s.pairs.filter(p => menuLabelRx.test(p.q.trim()) && !p.a));
+    const kbGap = allMeaningful.filter(p => p.a && /(안내 문서에 없|명시되어 있지 않|명시되지 않)/.test(p.a));
+
+    // 같은 질문 반복 (한 세션 내)
+    const repeats = [];
+    for (const s of sessions_qa) {
+      const seen = new Map();
+      for (const p of s.pairs) {
+        const k = p.q.trim();
+        if (k.length < 5) continue;
+        seen.set(k, (seen.get(k) || 0) + 1);
+      }
+      for (const [q, c] of seen) if (c >= 2) repeats.push({sid: s.sid, q, count: c});
+    }
+
+    // 정상 답변
+    const ok = allMeaningful.filter(p => p.a && !evasiveRx.test(p.a) && !hallucinationRx.test(p.a));
+
+    const stats = {
+      sessions: sessions_qa.length,
+      meaningfulQA: allMeaningful.length,
+      empty: empty.length,
+      evasive: evasive.length,
+      hallucination: hallucination.length,
+      dateError: dateErr.length,
+      menuBugs: menuBugs.length,
+      kbGap: kbGap.length,
+      repeats: repeats.length,
+      ok: ok.length,
+    };
+
+    // 카테고리별 회피율
+    const byCat = {};
+    for (const p of allMeaningful) {
+      const c = p.cat || '(없음)';
+      byCat[c] = byCat[c] || {total:0, bad:0};
+      byCat[c].total++;
+      if (!p.a || evasiveRx.test(p.a)) byCat[c].bad++;
+    }
+    const catRanked = Object.entries(byCat).map(([k,v])=>({cat:k, ...v, pct: Math.round(v.bad/v.total*100)})).sort((a,b)=>b.bad-a.bad);
+
+    // ==== 리포트 렌더링 ====
+    const esc = s => String(s||'').replace(/[<>&]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]));
+    const truncate = (s, n) => (s||'').length > n ? (s||'').substring(0,n) + '…' : (s||'');
+    const renderList = (items, mapper, max=30) => items.slice(0,max).map(mapper).join('') + (items.length > max ? `<p style="color:#888">… 외 ${items.length-max}건 (JSON 다운로드에 전체 포함)</p>` : '');
+
+    const html = `
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>퍼블로그 챗봇 분석 리포트</title>
+<style>
+body{font-family:'Malgun Gothic',sans-serif;max-width:1200px;margin:24px auto;padding:24px;background:#f5f7fa;color:#222}
+h1{color:#2563eb}
+.stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin:20px 0}
+.stat{background:white;padding:16px;border-radius:8px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
+.stat .v{font-size:28px;font-weight:bold;color:#2563eb}
+.stat.bad .v{color:#dc2626}
+.stat.warn .v{color:#d97706}
+.stat.ok .v{color:#059669}
+.stat .l{font-size:12px;color:#666;margin-top:4px}
+section{background:white;padding:20px;margin:16px 0;border-radius:8px;box-shadow:0 1px 3px rgba(0,0,0,0.05)}
+section h2{margin-top:0;border-bottom:2px solid #e5e7eb;padding-bottom:8px}
+.qa{padding:10px;margin:8px 0;border-left:3px solid #ddd;background:#fafafa;font-size:13px}
+.qa.bad{border-left-color:#dc2626;background:#fef2f2}
+.qa.warn{border-left-color:#d97706;background:#fffbeb}
+.qa .q{font-weight:bold;color:#1e293b}
+.qa .a{color:#475569;margin-top:4px;white-space:pre-wrap}
+.qa .meta{font-size:11px;color:#94a3b8;margin-top:4px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:6px 10px;border-bottom:1px solid #eee}
+th{background:#f8fafc}
+.dl{display:inline-block;padding:8px 16px;background:#059669;color:white;text-decoration:none;border-radius:6px;margin:8px 4px}
+</style></head>
+<body>
+<h1>📊 퍼블로그 챗봇 품질 분석</h1>
+<p>분석 대상: ${stats.sessions}세션 / 의미있는 Q&amp;A ${stats.meaningfulQA}건 · 기간: ${D}일${cutoffStr ? ' (필터: ' + cutoffStr + ' 이후)' : ''}</p>
+
+<div class="stats">
+  <div class="stat"><div class="v">${stats.sessions}</div><div class="l">세션</div></div>
+  <div class="stat"><div class="v">${stats.meaningfulQA}</div><div class="l">의미있는 Q&amp;A</div></div>
+  <div class="stat bad"><div class="v">${stats.empty}<small style="font-size:14px">/${Math.round(stats.empty/stats.meaningfulQA*100)||0}%</small></div><div class="l">빈 응답</div></div>
+  <div class="stat warn"><div class="v">${stats.evasive}<small style="font-size:14px">/${Math.round(stats.evasive/stats.meaningfulQA*100)||0}%</small></div><div class="l">회피·상담사연결</div></div>
+  <div class="stat ok"><div class="v">${stats.ok}<small style="font-size:14px">/${Math.round(stats.ok/stats.meaningfulQA*100)||0}%</small></div><div class="l">정상 답변</div></div>
+</div>
+
+<div class="stats">
+  <div class="stat warn"><div class="v">${stats.hallucination}</div><div class="l">환각 의심 (정책)</div></div>
+  <div class="stat warn"><div class="v">${stats.dateError}</div><div class="l">날짜 계산 오류</div></div>
+  <div class="stat bad"><div class="v">${stats.menuBugs}</div><div class="l">메뉴 라우팅 버그</div></div>
+  <div class="stat warn"><div class="v">${stats.kbGap}</div><div class="l">KB 누락 ("문서에 없음")</div></div>
+  <div class="stat warn"><div class="v">${stats.repeats}</div><div class="l">사용자 반복 질문</div></div>
+</div>
+
+<a class="dl" href="data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify({stats, catRanked, sessions_qa}, null, 2))}" download="publog-chatbot-${new Date().toISOString().slice(0,10)}.json">📥 전체 JSON 다운로드</a>
+
+<section><h2>🔴 빈 응답 (${empty.length})</h2>
+${renderList(empty, p => `<div class="qa bad"><div class="q">Q: ${esc(truncate(p.q,200))}</div><div class="meta">카테고리: ${esc(p.cat||'-')}</div></div>`)}
+</section>
+
+<section><h2>🔄 메뉴 라우팅 버그 (${menuBugs.length})</h2>
+${menuBugs.length === 0 ? '<p>없음</p>' : renderList(menuBugs, p => `<div class="qa bad"><div class="q">메뉴 클릭: ${esc(p.q)}</div><div class="meta">→ 빈 응답</div></div>`)}
+</section>
+
+<section><h2>🟠 환각 의심 답변 (${hallucination.length})</h2>
+${hallucination.length === 0 ? '<p>없음</p>' : renderList(hallucination, p => `<div class="qa warn"><div class="q">Q: ${esc(truncate(p.q,150))}</div><div class="a">A: ${esc(truncate(p.a,300))}</div></div>`)}
+</section>
+
+<section><h2>📚 KB 누락 ("안내 문서에 없음" 등) (${kbGap.length})</h2>
+${renderList(kbGap, p => `<div class="qa warn"><div class="q">Q: ${esc(truncate(p.q,200))}</div><div class="a">A: ${esc(truncate(p.a,300))}</div></div>`)}
+</section>
+
+<section><h2>🔁 사용자가 반복한 질문 (${repeats.length})</h2>
+${repeats.length === 0 ? '<p>없음</p>' : `<table><tr><th>질문</th><th>반복</th></tr>${repeats.map(r => `<tr><td>${esc(truncate(r.q,250))}</td><td>${r.count}회</td></tr>`).join('')}</table>`}
+</section>
+
+<section><h2>📊 카테고리별 회피율</h2>
+<table><tr><th>카테고리</th><th>총</th><th>빈/회피</th><th>회피율</th></tr>
+${catRanked.map(c => `<tr><td>${esc(c.cat)}</td><td>${c.total}</td><td>${c.bad}</td><td>${c.pct}%</td></tr>`).join('')}
+</table>
+</section>
+
+<section><h2>🟡 회피 답변 전체 (${evasive.length})</h2>
+${renderList(evasive, p => `<div class="qa warn"><div class="q">Q: ${esc(truncate(p.q,200))}</div><div class="a">A: ${esc(truncate(p.a,300))}</div></div>`, 50)}
+</section>
+
+<p style="color:#888;font-size:12px;text-align:center;margin-top:40px">생성 시각: ${new Date().toLocaleString('ko-KR')}</p>
+</body></html>`;
+
+    w.document.open();
+    w.document.write(html);
+    w.document.close();
+  } catch (e) {
+    log('❌ 오류: ' + e.message);
+    console.error(e);
+  }
+};
+
+// 북마클릿 URL 생성
+const fnSrc = RUNNER.toString();
+const bookmarklet = 'javascript:(' + fnSrc + ')();void 0;';
+document.getElementById('bm').href = bookmarklet;
+document.getElementById('src').textContent = bookmarklet;
+
+// 코드 복사 버튼 — 콘솔용 IIFE
+const consoleCode = '(' + fnSrc + ')();';
+document.getElementById('copybtn').onclick = async () => {
+  try {
+    await navigator.clipboard.writeText(consoleCode);
+    const m = document.getElementById('copymsg');
+    m.textContent = '✅ 복사됨! 챗봇 어드민 → F12 콘솔에 붙여넣기';
+    setTimeout(() => m.textContent = '', 5000);
+  } catch (e) {
+    alert('복사 실패: ' + e.message + '\n\n아래 박스의 코드를 직접 복사하세요.');
+  }
+};
+</script>
+</body>
+</html>
